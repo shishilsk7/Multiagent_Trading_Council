@@ -76,9 +76,9 @@ with st.sidebar:
     # Risk
     st.divider()
     st.subheader("💰 Risk Management")
-    capital = st.number_input("Capital ($)", min_value=10.0, value=10_000.0, step=1_000.0)
+    capital = st.number_input("Your Capital (₹)", min_value=1000.0, value=50_000.0, step=5_000.0)
     risk_percent = st.slider("Risk Per Trade (%)", 0.5, 10.0, 1.0, 0.25)
-    st.info(f"💡 Max risk/trade: **${capital * risk_percent / 100:,.2f}**")
+    st.info(f"💡 Max risk/trade: **₹{capital * risk_percent / 100:,.0f}**")
 
     # Charts
     st.divider()
@@ -309,6 +309,9 @@ if run_single:
         st.divider()
         st.markdown("## 📊 Trading Plan")
 
+        rate = trade.get("usd_inr_rate", 84.0)
+        st.caption(f"💱 USD/INR rate used: ₹{rate:.2f}  |  Your capital: ₹{trade['capital_inr']:,.0f} (≈ ${trade['capital_usd']:,.0f})")
+
         st.markdown("### ⏰ Entry Timing")
         e1, e2 = st.columns(2)
         e1.metric("Current Price",  f"${trade['current_price']:,.2f}")
@@ -318,16 +321,16 @@ if run_single:
 
         st.markdown("### 💼 Position Sizing")
         p1, p2, p3 = st.columns(3)
-        p1.metric("Capital Used",    f"${trade['capital_allocated']:,.2f}")
-        p2.metric("Position Size",   f"{trade['position_size_btc']:.6f} units")
-        p3.metric("Entry Cost",      f"${trade['entry_cost']:,.2f}")
+        p1.metric("Capital Used",  f"₹{trade['capital_inr']:,.0f}")
+        p2.metric("Position Size", f"{trade['position_size']:.6f} units")
+        p3.metric("Entry Cost",    f"₹{trade['entry_cost_inr']:,.0f}")
 
         st.markdown("### 🎯 Expected Outcome")
         o1, o2, o3, o4 = st.columns(4)
-        o1.metric("Target",   f"${trade['target_price']:,.2f}", f"+{trade['profit_pct']:.2f}%")
-        o2.metric("Profit",   f"${trade['expected_profit']:,.2f}", delta_color="normal")
-        o3.metric("Stop Loss",f"${trade['stop_loss']:,.2f}",    f"-{trade['loss_pct']:.2f}%")
-        o4.metric("Max Loss", f"${trade['max_loss']:,.2f}",     delta_color="inverse")
+        o1.metric("Target Price",   f"${trade['target_price']:,.2f}", f"+{trade['profit_pct']:.2f}%")
+        o2.metric("Expected Profit",f"₹{trade['expected_profit_inr']:,.0f}", delta_color="normal")
+        o3.metric("Stop Loss",      f"${trade['stop_loss']:,.2f}", f"-{trade['loss_pct']:.2f}%")
+        o4.metric("Max Loss",       f"₹{trade['max_loss_inr']:,.0f}", delta_color="inverse")
 
         rr = trade["risk_reward_ratio"]
         if rr >= 2:
@@ -336,6 +339,49 @@ if run_single:
             st.info(f"⚠️ **R:R = 1:{rr:.2f}** — Acceptable")
         else:
             st.error(f"❌ **R:R = 1:{rr:.2f}** — Poor risk/reward, consider skipping")
+
+        # ── Ready to Trade Card ──────────────────────────────────
+        st.divider()
+        st.markdown("### 🚀 Ready to Trade — Copy this into Groww / Zerodha")
+
+        platform_note = {
+            "BUY":  "Open Groww/Zerodha → Search asset → Place **CNC or MIS BUY order**",
+            "SELL": "Open Groww/Zerodha → Search asset → Place **CNC or MIS SELL order**",
+        }.get(decision, "")
+
+        rr_verdict = "✅ Good setup — go ahead" if rr >= 2 else ("⚠️ Acceptable — proceed carefully" if rr >= 1.5 else "❌ Poor R:R — consider skipping")
+
+        st.code(f"""
+╔══════════════════════════════════════════════════╗
+   📋  TRADE SETUP  —  {asset_name} ({ticker})
+╠══════════════════════════════════════════════════╣
+  Action      :  {decision}
+  Asset       :  {asset_name} ({ticker})
+
+  ── PRICE LEVELS (in $) ─────────────────────────
+  Current Price :  ${trade['current_price']:,.2f}
+  Entry Zone    :  ${trade['entry_zone_low']:,.2f}  →  ${trade['entry_zone_high']:,.2f}
+  Stop Loss     :  ${trade['stop_loss']:,.2f}   ← set this immediately on entry
+  Target        :  ${trade['target_price']:,.2f}   ← take profit here
+
+  ── YOUR MONEY (in ₹) ───────────────────────────
+  Capital       :  ₹{trade['capital_inr']:,.0f}
+  Max Risk      :  ₹{trade['max_risk_inr']:,.0f}  ({trade['risk_percent']}% of capital)
+  Entry Cost    :  ₹{trade['entry_cost_inr']:,.0f}
+  Expected Profit: ₹{trade['expected_profit_inr']:,.0f}  (+{trade['profit_pct']:.2f}%)
+  Max Loss      :  ₹{trade['max_loss_inr']:,.0f}  (-{trade['loss_pct']:.2f}%)
+
+  ── POSITION ────────────────────────────────────
+  Quantity      :  {trade['position_size']:.6f} units
+  Timing        :  {trade['timing']}
+
+  ── VERDICT ─────────────────────────────────────
+  Risk/Reward   :  1 : {rr:.2f}
+  Assessment    :  {rr_verdict}
+╚══════════════════════════════════════════════════╝
+""", language="text")
+
+        st.caption(f"💡 {platform_note}")
 
     # ── WAIT Analysis ────────────────────────────────────────────
     else:
