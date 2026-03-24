@@ -27,41 +27,41 @@ def analyze_wait_scenario(latest, tech, mom, news_text, risk_text):
         reasons.append("RSI oversold (< 30)")
         risk_factors.append("Momentum still declining")
         waiting_for.append("RSI reversal above 35")
-        potential_loss = "2–4% downside risk if early"
+        potential_loss = "2–4% if entering too early"
 
     if latest.get("ema20", 0) < latest.get("ema50", 0):
         reasons.append("Bearish EMA alignment (EMA20 < EMA50)")
-        risk_factors.append("Counter-trend trade")
+        risk_factors.append("Counter-trend trade risk")
         waiting_for.append("EMA crossover or confirmed support bounce")
 
     if adx < 15:
-        reasons.append("ADX < 15 — market is ranging, no clear trend")
-        risk_factors.append("Choppy price action increases false signals")
+        reasons.append("ADX < 15 — choppy, no clear trend")
+        risk_factors.append("False signals likely in ranging market")
         waiting_for.append("ADX above 20 for trend confirmation")
 
-    if "Avoid" in risk_text:
-        reasons.append("Risk agent recommends avoiding")
-        risk_factors.append("Volatility or ATR too high")
+    if "AVOID" in risk_text.upper():
+        reasons.append("Risk agent flagged high volatility")
+        risk_factors.append("ATR and ADX conditions unfavorable")
         waiting_for.append("Market stabilization")
 
-    if "Bearish" in news_text or "Negative" in news_text:
+    if "BEARISH" in news_text.upper() or "NEGATIVE" in news_text.upper():
         reasons.append("Negative news sentiment")
         risk_factors.append("Bearish headlines in play")
-        waiting_for.append("Sentiment shift")
+        waiting_for.append("Sentiment improvement")
         next_check = "12–24 hours"
 
     if rsi > 70 or rsi < 30:
         next_check = "2–4 hours"
 
     if not reasons:
-        reasons.append("No strong consensus among agents")
-        risk_factors.append("Mixed signals — uncertain direction")
-        waiting_for.append("Clearer directional signal")
+        reasons.append("Mixed signals — agents don't agree on direction")
+        risk_factors.append("Unclear direction increases loss risk")
+        waiting_for.append("Stronger consensus among agents")
 
     recommendation = (
-        "Hold off — multiple risk factors present. Patience is an edge."
+        "Hold off — multiple risk factors. Patience is an edge."
         if len(risk_factors) > 2
-        else "Monitor closely. A setup may develop within the next few hours."
+        else "Monitor closely. A clearer setup may form within a few hours."
     )
 
     return {
@@ -89,30 +89,30 @@ def run_enhanced_analysis(
     if df.empty:
         raise Exception("Failed to calculate indicators")
 
-    latest = df.iloc[-1]
-    data_source = df.attrs.get("source", "unknown")
+    latest       = df.iloc[-1]
+    data_source  = df.attrs.get("source", "unknown")
 
-    mem = load()
+    mem         = load()
     mem_summary = summarize(mem)
 
-    patterns    = interpret_patterns(latest)
-    sr          = sr_zone(latest)
-    vol         = volume_state(latest)
-    trend_str   = trend_strength(latest)
-    news_query  = get_news_query(ticker)
-    headlines   = fetch_news(query=news_query)
+    patterns   = interpret_patterns(latest)
+    sr         = sr_zone(latest)
+    vol        = volume_state(latest)
+    trend_str  = trend_strength(latest)
+    news_query = get_news_query(ticker)
+    headlines  = fetch_news(query=news_query)
 
-    # Run agents with richer prompts
-    tech = ask_llm("technical", technical_agent(latest, patterns, sr, vol, trend_str, mem_summary))
-    mom  = ask_llm("momentum",  momentum_agent(latest))
-    news_text = ask_llm("news", news_agent(headlines, ticker))
-    risk = ask_llm("risk",      risk_agent(latest, vol, ticker))
+    # Run all 4 agents
+    tech      = ask_llm("technical", technical_agent(latest, patterns, sr, vol, trend_str, mem_summary))
+    mom       = ask_llm("momentum",  momentum_agent(latest))
+    news_text = ask_llm("news",      news_agent(headlines, ticker))
+    risk      = ask_llm("risk",      risk_agent(latest, vol, ticker))
 
-    # Decision + confidence
-    decision = decide(tech, mom, risk)
-    conf     = confidence(tech, mom, news_text, risk, latest=latest)
+    # Decision uses indicator data directly (not just LLM text)
+    decision = decide(tech, mom, risk, latest=dict(latest))
+    conf     = confidence(tech, mom, news_text, risk, latest=dict(latest))
 
-    trade        = None
+    trade         = None
     wait_analysis = None
 
     if decision == "WAIT":
@@ -123,29 +123,29 @@ def run_enhanced_analysis(
     add(mem, decision, float(latest["Close"]), conf)
 
     return {
-        "ticker":       ticker,
-        "decision":     decision,
-        "confidence":   conf,
-        "trade":        trade,
+        "ticker":        ticker,
+        "decision":      decision,
+        "confidence":    conf,
+        "trade":         trade,
         "wait_analysis": wait_analysis,
-        "technical":    tech,
-        "momentum":     mom,
-        "news":         news_text,
-        "headlines":    headlines,
-        "risk":         risk,
-        "memory":       mem,
-        "sr_zone":      sr,
-        "trend_str":    trend_str,
+        "technical":     tech,
+        "momentum":      mom,
+        "news":          news_text,
+        "headlines":     headlines,
+        "risk":          risk,
+        "memory":        mem,
+        "sr_zone":       sr,
+        "trend_str":     trend_str,
         "current_price": float(latest["Close"]),
-        "data_source":  data_source,
-        "data_points":  len(df),
-        "atr":          float(latest.get("atr", 0)),
-        "adx":          float(latest.get("adx", 0)),
-        "rsi":          float(latest.get("rsi", 50)),
+        "data_source":   data_source,
+        "data_points":   len(df),
+        "atr":           float(latest.get("atr", 0)),
+        "adx":           float(latest.get("adx", 0)),
+        "rsi":           float(latest.get("rsi", 50)),
+        "macd_hist":     float(latest.get("macd_hist", 0)),
     }
 
 
-# Backward compat
 def run():
     result = run_enhanced_analysis()
     return (

@@ -260,6 +260,50 @@ if run_single:
     ki4.metric("Timeframe", timeframe)
     ki5.metric("Candles",   result["data_points"])
 
+    # ── Signal Breakdown ─────────────────────────────────────────
+    st.divider()
+    st.markdown("### 🔬 Signal Breakdown — Why this decision?")
+
+    from decision import _parse_signal
+    tech_sig = _parse_signal(result["technical"])
+    mom_sig  = _parse_signal(result["momentum"])
+    rsi_v    = result["rsi"]
+    macd_v   = result["macd_hist"]
+    rsi_sig  = "🟢 BUY" if rsi_v < 40 else ("🔴 SELL" if rsi_v > 60 else "🟡 Neutral")
+    macd_sig = "🟢 BUY" if macd_v > 0 else "🔴 SELL"
+    risk_u   = result["risk"].upper()
+    risk_lbl = "🔴 High" if "RISK: HIGH" in risk_u else ("🟡 Medium" if "RISK: MEDIUM" in risk_u else "🟢 Low")
+    risk_act = "⛔ Avoid" if ("RISK: HIGH" in risk_u and "AVOID" in risk_u) else "✅ Trade"
+
+    sb1, sb2, sb3, sb4, sb5, sb6 = st.columns(6)
+    sb1.metric("Technical Agent", "🟢 BUY" if tech_sig=="BUY" else ("🔴 SELL" if tech_sig=="SELL" else "🟡 WAIT"), "×3 weight")
+    sb2.metric("Momentum Agent",  "🟢 BUY" if mom_sig=="BUY"  else ("🔴 SELL" if mom_sig=="SELL"  else "🟡 WAIT"), "×2 weight")
+    sb3.metric("RSI Signal",      rsi_sig,  f"{rsi_v:.1f}")
+    sb4.metric("MACD Signal",     macd_sig, f"{macd_v:.4f}")
+    sb5.metric("Risk Level",      risk_lbl)
+    sb6.metric("Risk Action",     risk_act)
+
+    # Vote tally
+    buy_v  = (3 if tech_sig=="BUY"  else 0) + (2 if mom_sig=="BUY"  else 0)
+    sell_v = (3 if tech_sig=="SELL" else 0) + (2 if mom_sig=="SELL" else 0)
+    ind_buy  = sum([rsi_v < 40, macd_v > 0])
+    ind_sell = sum([rsi_v > 60, macd_v < 0])
+    if ind_buy >= 2:    buy_v  += 2
+    elif ind_buy == 1:  buy_v  += 1
+    if ind_sell >= 2:   sell_v += 2
+    elif ind_sell == 1: sell_v += 1
+
+    bar_buy  = "🟩" * buy_v  + "⬜" * (7 - buy_v)
+    bar_sell = "🟥" * sell_v + "⬜" * (7 - sell_v)
+    st.markdown(f"""
+| | Votes | Bar (max 7) |
+|---|---|---|
+| 🟢 BUY  | **{buy_v}** | {bar_buy} |
+| 🔴 SELL | **{sell_v}** | {bar_sell} |
+
+> Needs **3+ votes** to trigger · Final call: **{decision}** {"✅" if decision != "WAIT" else "⏸️"}
+""")
+
     # ── Trading Plan ─────────────────────────────────────────────
     if trade:
         st.divider()
