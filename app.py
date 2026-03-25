@@ -1,7 +1,6 @@
 import os
 from dotenv import load_dotenv
 import streamlit as st
-from datetime import datetime
 
 load_dotenv(override=True)
 
@@ -20,6 +19,9 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
+# ── Safe imports (no network calls at import time) ───────────────
+from stocks import UNIVERSE, CATEGORIES, ticker_label
+
 # ── Header ───────────────────────────────────────────────────────
 st.title("📈 AI Trading Intelligence Platform")
 st.markdown("*Multi-Agent Council · Technical + Momentum + News + Risk*")
@@ -27,9 +29,6 @@ st.markdown("*Multi-Agent Council · Technical + Momentum + News + Risk*")
 api_ok = bool(os.getenv("OPENROUTER_API_KEY"))
 st.caption("🔑 API: " + ("✅ Connected" if api_ok else "⚠️ Offline Mode"))
 st.divider()
-
-# ── Sidebar ──────────────────────────────────────────────────────
-from stocks import UNIVERSE, CATEGORIES, ticker_label
 
 with st.sidebar:
     st.header("⚙️ Settings")
@@ -98,7 +97,8 @@ with st.sidebar:
 st.subheader(f"📊 {asset_name} ({ticker}) — Live Snapshot")
 try:
     from data import fetch_ticker_timeframe
-    snap = fetch_ticker_timeframe(ticker, period="1d", interval="5m")
+    with st.spinner("Fetching live price..."):
+        snap = fetch_ticker_timeframe(ticker, period="1d", interval="5m")
     if not snap.empty:
         cp  = snap.iloc[-1]["Close"]
         chg = cp - snap.iloc[0]["Close"]
@@ -108,8 +108,10 @@ try:
         c2.metric("24h High",      f"${snap['High'].max():,.2f}")
         c3.metric("24h Low",       f"${snap['Low'].min():,.2f}")
         c4.metric("24h Volume",    f"{snap['Volume'].sum()/1e6:.1f}M")
+    else:
+        st.info("Market data unavailable — click Analyse to proceed.")
 except Exception:
-    st.info("Loading market data...")
+    st.info("Market data unavailable — click Analyse to proceed.")
 
 # ── Analysis ──────────────────────────────────────────────────────
 st.divider()

@@ -1,16 +1,23 @@
 # Live USD to INR rate fetch (falls back to fixed rate if offline)
 import requests
 
+_cached_rate = None
+
 def get_usd_inr():
+    global _cached_rate
+    if _cached_rate is not None:
+        return _cached_rate
     try:
         r = requests.get(
-            "https://api.exchangerate-api.com/v4/latest/USD", timeout=5
+            "https://api.exchangerate-api.com/v4/latest/USD",
+            timeout=3  # short timeout so it never hangs
         )
         if r.status_code == 200:
-            return r.json()["rates"]["INR"]
+            _cached_rate = r.json()["rates"]["INR"]
+            return _cached_rate
     except Exception:
         pass
-    return 84.0  # fallback fixed rate
+    return 84.0  # fallback fixed rate — never blocks
 
 
 def inr(usd_amount, rate):
