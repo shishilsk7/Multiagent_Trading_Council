@@ -8,6 +8,10 @@ from confidence import confidence
 from trade_levels import levels
 from memory import load, add, summarize
 from stocks import get_news_query
+from outcome_memory import (
+    record_signal, update_outcome,
+    get_similar_past_signals, get_ticker_stats
+)
 
 
 def analyze_wait_scenario(latest, tech, mom, news_text, risk_text):
@@ -78,7 +82,7 @@ def run_enhanced_analysis(
     ticker: str = "BTC-USD",
     period: str = "1d",
     interval: str = "5m",
-    capital: float = 10_000.0,
+    capital: float = 50_000.0,
     risk_percent: float = 1.0,
 ):
     df = fetch_ticker_timeframe(ticker, period=period, interval=interval)
@@ -89,26 +93,27 @@ def run_enhanced_analysis(
     if df.empty:
         raise Exception("Failed to calculate indicators")
 
-    latest       = df.iloc[-1]
-    data_source  = df.attrs.get("source", "unknown")
+    latest      = df.iloc[-1]
+    data_source = df.attrs.get("source", "unknown")
+    current_price = float(latest["Close"])
+
+    # Check + update outcomes for any pending signals before new analysis
+    update_outcome(ticker, current_price)
 
     mem         = load()
     mem_summary = summarize(mem)
 
-    patterns   = interpret_patterns(latest)
-    sr         = sr_zone(latest)
-    vol        = volume_state(latest)
-    trend_str  = trend_strength(latest)
-    news_query = get_news_query(ticker)
-    headlines  = fetch_news(query=news_query)
+    patterns  = interpret_patterns(latest)
+    sr        = sr_zone(latest)
+    vol       = volume_state(latest)
+    trend_str = trend_strength(latest)
+    headlines = fetch_news(query=get_news_query(ticker))
 
-    # Run all 4 agents
     tech      = ask_llm("technical", technical_agent(latest, patterns, sr, vol, trend_str, mem_summary))
     mom       = ask_llm("momentum",  momentum_agent(latest))
     news_text = ask_llm("news",      news_agent(headlines, ticker))
     risk      = ask_llm("risk",      risk_agent(latest, vol, ticker))
 
-    # Decision uses indicator data directly (not just LLM text)
     decision = decide(tech, mom, risk, latest=dict(latest))
     conf     = confidence(tech, mom, news_text, risk, latest=dict(latest))
 
@@ -119,8 +124,30 @@ def run_enhanced_analysis(
         wait_analysis = analyze_wait_scenario(latest, tech, mom, news_text, risk)
     else:
         trade = levels(latest, decision, sr, capital=capital, risk_percent=risk_percent)
+        # Save signal to outcome memory
+        if trade:
+            record_signal(
+                ticker=ticker, decision=decision,
+                entry_price=current_price,
+                stop_loss=trade["stop_loss"],
+                target_price=trade["target_price"],
+                confidence=conf,
+                rsi=float(latest.get("rsi", 50)),
+                adx=float(latest.get("adx", 0)),
+                macd_hist=float(latest.get("macd_hist", 0)),
+                sr_zone=sr,
+            )
 
-    add(mem, decision, float(latest["Close"]), conf)
+    # Fetch similar past signals for context
+    past_signals = get_similar_past_signals(
+        ticker=ticker, decision=decision,
+        rsi=float(latest.get("rsi", 50)),
+        macd_hist=float(latest.get("macd_hist", 0)),
+        sr_zone=sr,
+    )
+    ticker_stats = get_ticker_stats(ticker)
+
+    add(mem, decision, current_price, conf)
 
     return {
         "ticker":        ticker,
@@ -136,13 +163,15 @@ def run_enhanced_analysis(
         "memory":        mem,
         "sr_zone":       sr,
         "trend_str":     trend_str,
-        "current_price": float(latest["Close"]),
+        "current_price": current_price,
         "data_source":   data_source,
         "data_points":   len(df),
         "atr":           float(latest.get("atr", 0)),
         "adx":           float(latest.get("adx", 0)),
         "rsi":           float(latest.get("rsi", 50)),
         "macd_hist":     float(latest.get("macd_hist", 0)),
+        "past_signals":  past_signals,
+        "ticker_stats":  ticker_stats,
     }
 
 

@@ -408,6 +408,50 @@ if run_single:
                 if wait_analysis.get("potential_loss"):
                     st.error(f"**Risk of forcing trade:** {wait_analysis['potential_loss']}")
 
+    # ── Historical Outcomes ───────────────────────────────────────
+    past_signals = result.get("past_signals", [])
+    ticker_stats = result.get("ticker_stats")
+
+    if ticker_stats or past_signals:
+        st.divider()
+        st.subheader("📚 Historical Signal Memory")
+
+        if ticker_stats:
+            st.markdown("##### 📊 Your Track Record on this Asset")
+            ts1, ts2, ts3, ts4, ts5 = st.columns(5)
+            ts1.metric("Total Signals", ticker_stats["total"])
+            ts2.metric("Wins ✅",       ticker_stats["wins"])
+            ts3.metric("Losses ❌",     ticker_stats["losses"])
+            ts4.metric("Win Rate",      f"{ticker_stats['win_rate']}%",
+                       delta_color="normal" if ticker_stats["win_rate"] >= 50 else "inverse")
+            ts5.metric("Avg Win",       f"+{ticker_stats['avg_win']}%")
+
+        if past_signals:
+            st.markdown("##### 🔁 Similar Past Signals & Their Outcomes")
+            st.caption("These are signals with similar RSI, MACD and S/R zone that resolved previously.")
+            for ps in past_signals:
+                outcome_icon = "✅" if "TARGET" in ps["outcome"] else "❌"
+                pct_str = f"+{ps['outcome_pct']}%" if ps['outcome_pct'] > 0 else f"{ps['outcome_pct']}%"
+                ind = ps["indicators"]
+                with st.expander(
+                    f"{outcome_icon} {ps['decision']} signal on {ps['id']} → {ps['outcome']} ({pct_str})",
+                    expanded=False
+                ):
+                    c1, c2, c3, c4 = st.columns(4)
+                    c1.metric("Entry Price",  f"${ps['entry_price']:,.2f}")
+                    c2.metric("Target",       f"${ps['target_price']:,.2f}")
+                    c3.metric("Stop Loss",    f"${ps['stop_loss']:,.2f}")
+                    c4.metric("Result",       pct_str,
+                              delta_color="normal" if ps['outcome_pct'] > 0 else "inverse")
+                    st.caption(
+                        f"Conditions then: RSI {ind.get('rsi')} · "
+                        f"MACD {'▲' if ind.get('macd_hist',0)>0 else '▼'} · "
+                        f"Zone: {ind.get('sr_zone')} · "
+                        f"Confidence: {ps['confidence']}%"
+                    )
+        else:
+            st.info("No similar past signals yet for this asset. They'll appear here after your first BUY/SELL signals resolve (hit target or stop).")
+
     # ── Agent Details ─────────────────────────────────────────────
     st.divider()
     st.subheader("🧠 Agent Analysis")

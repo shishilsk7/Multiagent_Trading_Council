@@ -3,15 +3,15 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# Model roster — primary + fallback per role
+# Use openrouter/free as primary — auto-picks best available free model
+# Specific models as fallbacks in case the router has issues
 MODELS = {
-    "technical": ["google/gemma-3-27b-it:free", "mistralai/mistral-7b-instruct"],
-    "momentum":  ["mistralai/mistral-7b-instruct", "meta-llama/llama-3-8b-instruct"],
-    "news":      ["mistralai/mistral-7b-instruct", "meta-llama/llama-3-8b-instruct"],
-    "risk":      ["google/gemma-3-27b-it:free",    "meta-llama/llama-3-8b-instruct"],
+    "technical": ["openrouter/auto", "meta-llama/llama-3.3-70b-instruct:free", "qwen/qwen3-8b:free"],
+    "momentum":  ["openrouter/auto", "meta-llama/llama-3.3-70b-instruct:free", "qwen/qwen3-8b:free"],
+    "news":      ["openrouter/auto", "meta-llama/llama-3.3-70b-instruct:free", "qwen/qwen3-8b:free"],
+    "risk":      ["openrouter/auto", "meta-llama/llama-3.3-70b-instruct:free", "qwen/qwen3-8b:free"],
 }
 
-# Lazy client — only created when ask_llm() is first called, NOT at import time
 _client = None
 
 def _get_client():
@@ -35,15 +35,18 @@ def ask_llm(role: str, prompt: str) -> str:
     if not client:
         return "WAIT (API key not configured)"
 
-    for model in MODELS.get(role, ["mistralai/mistral-7b-instruct"]):
+    for model in MODELS.get(role, ["openrouter/auto"]):
         try:
             res = client.chat.completions.create(
                 model=model,
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.1,
-                max_tokens=200,
+                max_tokens=250,
+                timeout=20,
             )
-            return res.choices[0].message.content.strip()
+            text = res.choices[0].message.content
+            if text and text.strip():
+                return text.strip()
         except Exception as e:
             print(f"Model {model} failed: {e}")
             continue
