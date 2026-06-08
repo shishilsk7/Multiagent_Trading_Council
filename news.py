@@ -11,7 +11,7 @@ def _entry_is_fresh(entry, max_age_hours: int) -> bool:
     return datetime.now(timezone.utc) - published_dt <= timedelta(hours=max_age_hours)
 
 
-def fetch_news(query: str = "bitcoin crypto", max_items: int = 6, max_age_hours: int = 24):
+def fetch_news(query: str = "bitcoin crypto", filter_terms: list = None, max_items: int = 6, max_age_hours: int = 24):
     """
     Fetch recent headlines for any query (ticker name, company, etc.)
     """
@@ -21,9 +21,17 @@ def fetch_news(query: str = "bitcoin crypto", max_items: int = 6, max_age_hours:
     except Exception:
         return []
 
+    if filter_terms:
+        filter_terms = [t.lower() for t in filter_terms]
+
     fresh = []
     for entry in feed.entries:
         if _entry_is_fresh(entry, max_age_hours):
+            if filter_terms:
+                title_lower = entry.title.lower()
+                if not any(t in title_lower for t in filter_terms):
+                    continue
+                    
             published = getattr(entry, "published_parsed", None)
             if published:
                 dt = datetime.fromtimestamp(time.mktime(published), tz=timezone.utc)

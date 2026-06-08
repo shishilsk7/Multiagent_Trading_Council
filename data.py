@@ -54,23 +54,8 @@ def fetch_ticker_timeframe(ticker: str, period: str = "1d", interval: str = "5m"
         except Exception as e:
             print(f"Binance fallback failed: {e}")
 
-    # Method 3: Mock data (last resort)
-    print(f"WARNING: All sources failed for {ticker}, generating mock data")
-    periods = 150
-    base = 100
-    ts = pd.date_range(end=pd.Timestamp.now(), periods=periods, freq="5min")
-    prices = base + np.cumsum(np.random.normal(0, 0.5, periods))
-    df = pd.DataFrame({
-        "Open":   prices + np.random.uniform(-0.2, 0.2, periods),
-        "High":   prices + np.random.uniform(0.2, 0.8, periods),
-        "Low":    prices - np.random.uniform(0.2, 0.8, periods),
-        "Close":  prices,
-        "Volume": np.random.randint(1_000_000, 5_000_000, periods),
-    }, index=ts)
-    df.index.name = "Datetime"
-    df.attrs["source"] = "mock"
-    df.attrs["ticker"] = ticker
-    return df
+    # Method 3: Raise exception instead of using mock data
+    raise Exception(f"All data sources failed for {ticker}")
 
 
 # Backward-compatible wrappers

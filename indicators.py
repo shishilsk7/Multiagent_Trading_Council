@@ -51,9 +51,30 @@ def add_indicators(df):
     df["vol_ratio"] = volume / df["vol_ma"]
     df["obv"]       = ta.volume.OnBalanceVolumeIndicator(close, volume).on_balance_volume()
 
-    # Candlestick placeholders
-    df["engulfing"] = 0
-    df["hammer"]    = 0
+    # Candlestick logic
+    prev_close = close.shift(1)
+    prev_open = df["Open"].shift(1)
+    curr_open = df["Open"]
+    curr_close = close
+
+    # Bullish Engulfing
+    df["engulfing"] = np.where(
+        (prev_close < prev_open) & 
+        (curr_close > curr_open) & 
+        (curr_open <= prev_close) & 
+        (curr_close >= prev_open), 1, 0
+    )
+
+    # Hammer
+    body = abs(curr_close - curr_open)
+    lower_shadow = np.minimum(curr_close, curr_open) - low
+    upper_shadow = high - np.maximum(curr_close, curr_open)
+    
+    df["hammer"] = np.where(
+        (lower_shadow > 2 * body) & 
+        (upper_shadow < 0.2 * body) & 
+        (body > 0), 1, 0
+    )
 
     df.dropna(inplace=True)
     return df

@@ -29,38 +29,41 @@ def calculate_entry_zone(latest, sr_zone, decision):
     price      = latest["Close"]
     support    = latest["support"]
     resistance = latest["resistance"]
+    atr        = latest.get("atr", price * 0.01)
+
+    buffer     = atr * 0.5
 
     if decision == "BUY":
         if sr_zone == "Near Support":
-            entry_low  = round(support * 1.001, 2)
-            entry_high = round(support * 1.003, 2)
+            entry_low  = round(support, 2)
+            entry_high = round(support + buffer, 2)
             timing = "Wait for dip near support zone"
         elif sr_zone == "Near Resistance":
-            entry_low  = round(resistance * 1.002, 2)
-            entry_high = round(resistance * 1.005, 2)
+            entry_low  = round(resistance + buffer, 2)
+            entry_high = round(resistance + 2 * buffer, 2)
             timing = "Wait for breakout above resistance"
         else:
-            entry_low  = round(price * 0.997, 2)
-            entry_high = round(price * 0.999, 2)
+            entry_low  = round(price - buffer, 2)
+            entry_high = round(price, 2)
             timing = "Enter on slight pullback"
-        stop   = round(support * 0.995, 2)
-        target = round(price * 1.015, 2)
+        stop   = round(support - atr, 2)
+        target = round(price + 2 * atr, 2)
 
     elif decision == "SELL":
         if sr_zone == "Near Resistance":
-            entry_low  = round(resistance * 0.997, 2)
-            entry_high = round(resistance * 0.999, 2)
+            entry_low  = round(resistance - buffer, 2)
+            entry_high = round(resistance, 2)
             timing = "Exit near resistance zone"
         elif sr_zone == "Near Support":
-            entry_low  = round(support * 0.995, 2)
-            entry_high = round(support * 0.998, 2)
+            entry_low  = round(support - 2 * buffer, 2)
+            entry_high = round(support - buffer, 2)
             timing = "Exit if breakdown below support"
         else:
-            entry_low  = round(price * 1.001, 2)
-            entry_high = round(price * 1.003, 2)
+            entry_low  = round(price, 2)
+            entry_high = round(price + buffer, 2)
             timing = "Exit on bounce"
-        stop   = round(resistance * 1.005, 2)
-        target = round(price * 0.985, 2)
+        stop   = round(resistance + atr, 2)
+        target = round(price - 2 * atr, 2)
     else:
         return None
 
@@ -71,7 +74,6 @@ def calculate_entry_zone(latest, sr_zone, decision):
         "target":     target,
         "timing":     timing,
     }
-
 
 def calculate_position_size(capital_usd, risk_percent, entry, stop):
     risk_amount = capital_usd * (risk_percent / 100)
