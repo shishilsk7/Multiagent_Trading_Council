@@ -98,9 +98,8 @@ Reason: [one line citing the strongest 1-2 momentum signals]
 """
 
 
-def news_agent(headlines, ticker):
+def news_agent(headlines, ticker, current_price=None, sr_zone=None, support=None, resistance=None):
     if headlines:
-        # Format with recency indicator (first = most recent)
         headline_text = "\n".join(
             f"[{'LATEST' if i == 0 else f'#{i+1}'}] {h}"
             for i, h in enumerate(headlines)
@@ -110,10 +109,30 @@ def news_agent(headlines, ticker):
         headline_text = "No recent headlines found."
         count = 0
 
+    # Build price context block only when data is available
+    if current_price is not None:
+        dist_support    = f"{abs(current_price - support) / current_price * 100:.1f}% above support" if support else "N/A"
+        dist_resistance = f"{abs(resistance - current_price) / current_price * 100:.1f}% below resistance" if resistance else "N/A"
+        price_context = f"""
+=== PRICE CONTEXT ===
+Current Price:      {current_price:.4f}
+S/R Zone:           {sr_zone or 'Unknown'}
+Distance to Support:    {dist_support}
+Distance to Resistance: {dist_resistance}
+
+Interpret news impact relative to price position:
+- Bullish news near RESISTANCE is less actionable (price may stall)
+- Bullish news near SUPPORT is high conviction (news + technical align)
+- Bearish news near SUPPORT has limited downside if support holds
+- Bearish news near RESISTANCE confirms breakdown risk
+"""
+    else:
+        price_context = ""
+
     return f"""You are a market sentiment analyst for {ticker}.
 
 Analyse {count} recent headlines. Weight the LATEST headline most heavily.
-
+{price_context}
 === HEADLINES ===
 {headline_text}
 
@@ -122,6 +141,7 @@ Analyse {count} recent headlines. Weight the LATEST headline most heavily.
 - Negative: earnings miss, investigation, downgrade, layoffs, ban, hack
 - Neutral: routine updates, analyst price target adjustments within 5%
 - If no headlines or purely routine: respond Neutral / Neutral
+- Factor in price position when assessing impact strength
 
 === OUTPUT FORMAT — EXACTLY 3 LINES ===
 Sentiment: Positive
