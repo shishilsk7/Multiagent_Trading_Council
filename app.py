@@ -40,16 +40,16 @@ api_ok = bool(os.getenv("GEMINI_API_KEY") or os.getenv("OPENROUTER_API_KEY"))
 status = "✅ API Connected" if api_ok else "⚠️ API Key Missing — set GEMINI_API_KEY or OPENROUTER_API_KEY"
 st.caption(f"🔑 {status}")
 
-if api_ok:
-    @st.cache_data(ttl=300, show_spinner=False)
-    def _cached_llm_check():
-        return check_llm_connectivity()
+if api_ok and "llm_status" not in st.session_state:
+    llm_ok, llm_msg = check_llm_connectivity()
+    st.session_state["llm_status"] = (llm_ok, llm_msg)
 
-    llm_ok, llm_msg = _cached_llm_check()
+if "llm_status" in st.session_state:
+    llm_ok, llm_msg = st.session_state["llm_status"]
     if llm_ok:
         st.caption(f"🤖 LLM: ✅ {llm_msg}")
     else:
-        st.warning(f"🤖 LLM: ⚠️ {llm_msg} — analysis will degrade")
+        st.warning(f"🤖 LLM: ⚠️ {llm_msg}")
 st.divider()
 
 # ── Sidebar ──────────────────────────────────────────────────────────
