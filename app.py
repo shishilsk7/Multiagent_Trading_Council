@@ -80,9 +80,10 @@ with st.sidebar:
     st.subheader("📊 Timeframe")
     timeframe = st.selectbox(
         "Period",
-        ["1 Hour", "4 Hours", "1 Day", "3 Days", "1 Week", "1 Month"],
+        ["1 Hour — Scalping", "4 Hours — Intraday", "1 Day — Intraday", "3 Days — Short Swing", "1 Week — Swing Trade", "1 Month — Positional"],
         index=2,
     )
+    timeframe = timeframe.split(" — ")[0]  # strip label before use
 
     st.divider()
     st.subheader("💰 Risk Management")
