@@ -4,32 +4,20 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# openrouter/auto removed as primary — it's a meta-router that fails even when models are fine.
-# Models ordered by reliability on free tier. News/risk use lighter models (faster, cheaper quota).
+# Models verified available on OpenRouter free tier (June 2026)
+_FREE_MODELS = [
+    "meta-llama/llama-3.3-70b-instruct:free",
+    "meta-llama/llama-3.1-8b-instruct:free",
+    "mistralai/mistral-7b-instruct:free",
+    "google/gemma-2-9b-it:free",
+    "nousresearch/hermes-3-llama-3.1-405b:free",
+]
+
 MODELS = {
-    "technical": [
-        "meta-llama/llama-3.3-70b-instruct:free",
-        "deepseek/deepseek-r1-0528:free",
-        "qwen/qwen3-14b:free",
-        "qwen/qwen3-8b:free",
-        "mistralai/mistral-7b-instruct:free",
-    ],
-    "momentum": [
-        "meta-llama/llama-3.3-70b-instruct:free",
-        "deepseek/deepseek-r1-0528:free",
-        "qwen/qwen3-8b:free",
-        "mistralai/mistral-7b-instruct:free",
-    ],
-    "news": [
-        "qwen/qwen3-8b:free",
-        "meta-llama/llama-3.3-70b-instruct:free",
-        "mistralai/mistral-7b-instruct:free",
-    ],
-    "risk": [
-        "qwen/qwen3-8b:free",
-        "meta-llama/llama-3.3-70b-instruct:free",
-        "mistralai/mistral-7b-instruct:free",
-    ],
+    "technical": _FREE_MODELS,
+    "momentum":  _FREE_MODELS,
+    "news":      _FREE_MODELS,
+    "risk":      _FREE_MODELS,
 }
 
 _client = None
@@ -87,29 +75,29 @@ def ask_llm(role: str, prompt: str) -> str:
 
 def check_llm_connectivity() -> tuple[bool, str]:
     """
-    Quick connectivity probe — tries a minimal request.
+    Quick connectivity probe — tries each free model until one responds.
     Returns (ok: bool, message: str).
-    Used by app.py to show status in sidebar.
     """
     client = _get_client()
     if not client:
         return False, "API key not configured"
-    try:
-        res = client.chat.completions.create(
-            model="qwen/qwen3-8b:free",
-            messages=[{"role": "user", "content": "Reply: OK"}],
-            temperature=0,
-            max_tokens=5,
-            timeout=10,
-        )
-        text = res.choices[0].message.content or ""
-        if text.strip():
-            return True, "Connected"
-        return False, "Empty response"
-    except Exception as e:
-        err = str(e)
-        if "429" in err:
-            return False, "Rate limited — wait 1 min"
-        if "401" in err:
-            return False, "Invalid API key"
-        return False, err[:80]
+    for model in _FREE_MODELS:
+        try:
+            res = client.chat.completions.create(
+                model=model,
+                messages=[{"role": "user", "content": "Reply: OK"}],
+                temperature=0,
+                max_tokens=5,
+                timeout=10,
+            )
+            text = (res.choices[0].message.content or "").strip()
+            if text:
+                return True, f"Connected ({model.split('/')[1]})"
+        except Exception as e:
+            err = str(e)
+            if "401" in err:
+                return False, "Invalid API key"
+            if "429" in err:
+                return False, "Rate limited — wait 1 min"
+            continue
+    return False, "All models unavailable — check openrouter.ai/models for free models"
