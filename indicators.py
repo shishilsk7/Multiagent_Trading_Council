@@ -13,8 +13,8 @@ import numpy as np
 
 
 def add_indicators(df):
-    if len(df) < 55:
-        return pd.DataFrame()  # not enough data for EMA50 + ADX14
+    if len(df) < 30:
+        return pd.DataFrame()  # truly not enough data even for EMA20
 
     close  = df["Close"]
     high   = df["High"]

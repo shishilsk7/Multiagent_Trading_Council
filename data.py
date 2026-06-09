@@ -18,11 +18,13 @@ except ImportError:
 
 # Period fallback chain: if narrow period returns too few candles, try wider ones
 _PERIOD_FALLBACKS = {
-    "1d":  ["1d", "2d", "5d"],
-    "3d":  ["3d", "5d"],
-    "7d":  ["7d", "10d"],
+    "1d":  ["2d", "5d", "7d"],
+    "3d":  ["5d", "7d"],
+    "7d":  ["7d", "10d", "14d"],
     "30d": ["30d", "60d"],
 }
+
+_MIN_CANDLES = 55  # needed for EMA50 + ADX14
 
 
 def fetch_ticker_timeframe(ticker: str, period: str = "1d", interval: str = "5m") -> pd.DataFrame:
@@ -30,8 +32,8 @@ def fetch_ticker_timeframe(ticker: str, period: str = "1d", interval: str = "5m"
     Fetch OHLCV data for a ticker with automatic period-widening retry.
 
     Indian stocks (.NS/.BO) on sub-15m intervals frequently return sparse data
-    from yfinance — this retries with progressively wider periods until we get
-    at least 55 candles (minimum needed for indicators).
+    from yfinance — retries with progressively wider periods until we get
+    at least _MIN_CANDLES candles.
 
     attrs["source"] = "yfinance" | "mock"
     """
@@ -40,7 +42,8 @@ def fetch_ticker_timeframe(ticker: str, period: str = "1d", interval: str = "5m"
         df.attrs["source"] = "mock"
         return df
 
-    periods_to_try = _PERIOD_FALLBACKS.get(period, [period])
+    # Always try the requested period first, then fallbacks
+    periods_to_try = [period] + [p for p in _PERIOD_FALLBACKS.get(period, []) if p != period]
 
     for p in periods_to_try:
         try:
@@ -63,19 +66,34 @@ def fetch_ticker_timeframe(ticker: str, period: str = "1d", interval: str = "5m"
             df = df[["Open", "High", "Low", "Close", "Volume"]].copy()
             df.dropna(inplace=True)
 
-            if len(df) >= 55:
-                df.attrs["source"] = "yfinance"
-                return df
-
-            # Got some data but not enough — try wider period
-            if len(df) >= 10 and p == periods_to_try[-1]:
-                # Last fallback — return what we have, indicators.py will handle it
+            if len(df) >= _MIN_CANDLES:
                 df.attrs["source"] = "yfinance"
                 return df
 
         except Exception as e:
             print(f"data.py: yfinance failed for {ticker} period={p}: {e}")
             continue
+
+    # Last resort: try a daily interval with 60d period — works for almost all assets
+    try:
+        df = yf.download(
+            ticker,
+            period="60d",
+            interval="1d",
+            auto_adjust=True,
+            progress=False,
+            threads=False,
+        )
+        if isinstance(df.columns, pd.MultiIndex):
+            df.columns = df.columns.get_level_values(0)
+        if not df.empty:
+            df = df[["Open", "High", "Low", "Close", "Volume"]].copy()
+            df.dropna(inplace=True)
+            if len(df) >= _MIN_CANDLES:
+                df.attrs["source"] = "yfinance"
+                return df
+    except Exception as e:
+        print(f"data.py: fallback 60d/1d failed for {ticker}: {e}")
 
     df = _mock_df()
     df.attrs["source"] = "mock"
