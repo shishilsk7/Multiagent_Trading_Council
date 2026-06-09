@@ -98,9 +98,8 @@ Reason: [one line citing the strongest 1-2 momentum signals]
 """
 
 
-def news_agent(headlines, ticker):
+def news_agent(headlines, ticker, current_price=None, sr_zone=None, support=None, resistance=None):
     if headlines:
-        # Format with recency indicator (first = most recent)
         headline_text = "\n".join(
             f"[{'LATEST' if i == 0 else f'#{i+1}'}] {h}"
             for i, h in enumerate(headlines)
@@ -110,10 +109,29 @@ def news_agent(headlines, ticker):
         headline_text = "No recent headlines found."
         count = 0
 
+    if current_price is not None:
+        dist_support    = f"{abs(current_price - support) / current_price * 100:.1f}% above support" if support else "N/A"
+        dist_resistance = f"{abs(resistance - current_price) / current_price * 100:.1f}% below resistance" if resistance else "N/A"
+        price_context = f"""
+=== PRICE CONTEXT ===
+Current Price:          {current_price:.4f}
+S/R Zone:               {sr_zone or 'Unknown'}
+Distance to Support:    {dist_support}
+Distance to Resistance: {dist_resistance}
+
+Interpret news impact relative to price position:
+- Bullish news near RESISTANCE is less actionable (price may stall)
+- Bullish news near SUPPORT is high conviction (news + technical align)
+- Bearish news near SUPPORT has limited downside if support holds
+- Bearish news near RESISTANCE confirms breakdown risk
+"""
+    else:
+        price_context = ""
+
     return f"""You are a market sentiment analyst for {ticker}.
 
 Analyse {count} recent headlines. Weight the LATEST headline most heavily.
-
+{price_context}
 === HEADLINES ===
 {headline_text}
 
@@ -122,6 +140,7 @@ Analyse {count} recent headlines. Weight the LATEST headline most heavily.
 - Negative: earnings miss, investigation, downgrade, layoffs, ban, hack
 - Neutral: routine updates, analyst price target adjustments within 5%
 - If no headlines or purely routine: respond Neutral / Neutral
+- Factor in price position when assessing impact strength
 
 === OUTPUT FORMAT — EXACTLY 3 LINES ===
 Sentiment: Positive
@@ -131,16 +150,11 @@ Key factor: [one line — cite the most impactful headline or "No significant ne
 
 
 def risk_agent(latest, volume, ticker):
-    """
-    Real risk analysis — NOT pre-answered.
-    The LLM must assess based on the data, not echo back a suggestion.
-    """
     atr_pct  = (latest['atr'] / latest['Close'] * 100) if latest['Close'] > 0 else 0
     bb_width = latest.get('bb_width', 0.05)
     adx      = latest['adx']
     rsi      = latest['rsi']
 
-    # Provide context only — no suggested answer
     volatility_context = (
         "Very high volatility — wide price swings expected" if atr_pct > 5
         else "Elevated volatility" if atr_pct > 3
@@ -154,6 +168,17 @@ def risk_agent(latest, volume, ticker):
         else "Weak/no trend — range-bound, higher false signal risk"
     )
 
+    # Pre-calculate hard risk level — LLM must use this exactly
+    if (atr_pct > 5 and adx < 15) or (rsi > 80 or rsi < 20):
+        forced_risk   = "High"
+        forced_action = "Avoid"
+    elif atr_pct > 3 or (adx > 0 and adx < 18) or (rsi > 70 or rsi < 30):
+        forced_risk   = "Medium"
+        forced_action = "Caution"
+    else:
+        forced_risk   = "Low"
+        forced_action = "Trade"
+
     return f"""You are a risk manager assessing whether to allow a trade on {ticker}.
 
 === RISK DATA ===
@@ -163,22 +188,13 @@ ADX:        {adx:.1f}  [{trend_context}]
 RSI:        {rsi:.1f}  [{"Extreme — reversal risk" if rsi > 75 or rsi < 25 else "Normal range"}]
 Volume:     {volume}
 
-=== ASSESSMENT FRAMEWORK ===
-HIGH risk (recommend AVOID) when ALL of:
-  - ATR% > 5% AND ADX < 15 (volatile + no trend = chaos)
-  OR
-  - RSI extreme (>80 or <20) AND volume anomaly (very high or very low)
+=== MANDATORY CLASSIFICATION (DO NOT OVERRIDE) ===
+Risk level has been pre-determined by the rule engine: {forced_risk}
+Action has been pre-determined by the rule engine: {forced_action}
+You MUST output exactly these values on lines 1 and 2. No substitutions.
 
-MEDIUM risk when:
-  - ATR% 3-5% OR ADX 15-18 OR RSI 70-80/20-30
-
-LOW risk when:
-  - ATR% < 3% AND ADX > 20 AND RSI 35-65
-
-Normal/moderate volatility is acceptable — do NOT default to AVOID for standard market conditions.
-
-=== OUTPUT FORMAT — EXACTLY 3 LINES ===
-Risk: Low
-Action: Trade
-Reason: [one line citing the 2 most relevant risk factors]
+=== OUTPUT FORMAT — EXACTLY 3 LINES, NO DEVIATION ===
+Risk: {forced_risk}
+Action: {forced_action}
+Reason: [one line citing the 2 most relevant risk factors from the data above]
 """

@@ -30,7 +30,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-from stocks import UNIVERSE, CATEGORIES, ticker_label
+from stocks import UNIVERSE, CATEGORIES, ticker_label, currency_label
 
 st.title("📈 AI Trading Council")
 st.markdown("*Technical · Momentum · News · Risk — Real-money grade analysis*")
@@ -93,21 +93,32 @@ with st.sidebar:
         chart_url = f"https://finance.yahoo.com/quote/{ticker}"
     st.link_button(f"📊 Open {chart_src}", chart_url, use_container_width=True)
 
+    st.divider()
+    st.subheader("⏱️ Auto-Refresh")
+    auto_refresh = st.checkbox("Enable (intraday)", value=False)
+    refresh_secs = st.slider("Interval (seconds)", 30, 300, 60, step=30, disabled=not auto_refresh)
+
 # ── Live Snapshot ─────────────────────────────────────────────────────
 st.subheader(f"📊 {asset_name} ({ticker})")
 try:
     from data import fetch_ticker_timeframe
+
+    @st.cache_data(ttl=300, show_spinner=False)
+    def _cached_snapshot(t):
+        return fetch_ticker_timeframe(t, period="1d", interval="5m")
+
     with st.spinner("Fetching price..."):
-        snap = fetch_ticker_timeframe(ticker, period="1d", interval="5m")
+        snap = _cached_snapshot(ticker)
     if not snap.empty and snap.attrs.get("source") != "mock":
         cp  = snap.iloc[-1]["Close"]
         chg = cp - snap.iloc[0]["Close"]
         pct = chg / snap.iloc[0]["Close"] * 100
+        cur = currency_label(ticker)
         c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Price",     f"${cp:,.4f}", f"{pct:+.2f}%")
-        c2.metric("24h High",  f"${snap['High'].max():,.4f}")
-        c3.metric("24h Low",   f"${snap['Low'].min():,.4f}")
-        c4.metric("Volume",    f"{snap['Volume'].sum()/1e6:.2f}M")
+        c1.metric("Price",    f"{cur}{cp:,.4f}", f"{pct:+.2f}%")
+        c2.metric("24h High", f"{cur}{snap['High'].max():,.4f}")
+        c3.metric("24h Low",  f"{cur}{snap['Low'].min():,.4f}")
+        c4.metric("Volume",   f"{snap['Volume'].sum()/1e6:.2f}M")
     else:
         st.warning("⚠️ Live price unavailable. Check connection before analysing.")
 except Exception:
@@ -165,13 +176,13 @@ if run_scan and scan_enabled and scan_tickers:
                 "Asset":      UNIVERSE[t][0],
                 "Signal":     r["decision"],
                 "Conf %":     f"{r['confidence']}%",
-                "Price":      f"${r['current_price']:,.4f}",
+                "Price":      f"{currency_label(t)}{r['current_price']:,.4f}",
                 "RSI":        f"{r['rsi']:.1f}",
                 "ADX":        f"{r['adx']:.1f}",
                 "Zone":       r["sr_zone"],
                 "R:R":        f"1:{trade.get('risk_reward_ratio','—')}" if trade else "—",
-                "Target":     f"${trade['target_price']:,.4f}" if trade else "—",
-                "Stop":       f"${trade['stop_loss']:,.4f}" if trade else "—",
+                "Target":     f"{currency_label(t)}{trade['target_price']:,.4f}" if trade else "—",
+                "Stop":       f"{currency_label(t)}{trade['stop_loss']:,.4f}" if trade else "—",
             })
         except Exception as e:
             scan_results.append({
@@ -208,18 +219,34 @@ if run_scan and scan_enabled and scan_tickers:
 # ══════════════════════════════════════════════════════════════════════
 # SINGLE ASSET ANALYSIS
 # ══════════════════════════════════════════════════════════════════════
+if "last_result" not in st.session_state:
+    st.session_state["last_result"] = None
+    st.session_state["last_result_time"] = None
+
 if run_single:
     from core import run_enhanced_analysis
 
     with st.spinner(f"🤖 Analysing {asset_name} — running 4 agents in parallel…"):
         try:
-            result = run_enhanced_analysis(
+            st.session_state["last_result"] = run_enhanced_analysis(
                 ticker=ticker, period=period, interval=final_interval,
                 capital=capital, risk_percent=risk_percent,
             )
+            st.session_state["last_result_time"] = __import__('datetime').datetime.now().strftime("%H:%M:%S")
         except Exception as e:
             st.error(f"❌ Analysis failed: {e}")
             st.stop()
+
+if st.session_state["last_result"] is not None:
+    result = st.session_state["last_result"]
+    if st.session_state["last_result_time"]:
+        st.caption(f"Last run: {st.session_state['last_result_time']} — change settings and click Analyse to refresh")
+
+    # auto-refresh trigger (only when a result exists)
+    if auto_refresh:
+        import time
+        time.sleep(refresh_secs)
+        st.rerun()
 
     decision      = result["decision"]
     conf          = result["confidence"]
@@ -246,7 +273,7 @@ if run_single:
     conf_label = "High 🔥" if conf >= 70 else ("Medium" if conf >= 50 else "Low ⚠️")
     d2.metric("Confidence",  f"{conf}%", conf_label,
               delta_color="normal" if conf >= 65 else ("off" if conf >= 50 else "inverse"))
-    d3.metric("Price",       f"${result['current_price']:,.4f}")
+    d3.metric("Price",       f"{currency_label(ticker)}{result['current_price']:,.4f}")
     d4.metric("S/R Zone",    result["sr_zone"])
     d5.metric("Trend",       result["trend_str"][:20])
 
@@ -264,7 +291,7 @@ if run_single:
     k2.metric("ADX",      f"{adx_v:.1f}",
               "Trending" if adx_v > 25 else "Ranging",
               delta_color="normal" if adx_v > 25 else "inverse")
-    k3.metric("ATR",      f"${atr_v:.4f}",
+    k3.metric("ATR",      f"{currency_label(ticker)}{atr_v:.4f}",
               f"{(atr_v/result['current_price']*100):.2f}% of price")
     k4.metric("MACD Hist", f"{macd_v:.5f}",
               "▲ Bullish" if macd_v > 0 else "▼ Bearish",
@@ -331,18 +358,19 @@ if run_single:
         # Entry
         st.markdown("### ⏰ Entry")
         e1, e2, e3 = st.columns(3)
-        e1.metric("Current Price",  f"${trade['current_price']:,.4f}")
-        e2.metric("Entry Zone",     f"${trade['entry_zone_low']:,.4f} → ${trade['entry_zone_high']:,.4f}")
+        cur = currency_label(ticker)
+        e1.metric("Current Price",  f"{cur}{trade['current_price']:,.4f}")
+        e2.metric("Entry Zone",     f"{cur}{trade['entry_zone_low']:,.4f} → {cur}{trade['entry_zone_high']:,.4f}")
         e3.info(f"**⏱️ Timing:** {trade['timing']}")
 
         # Levels
         st.markdown("### 🎯 Levels & P&L")
         l1, l2, l3, l4 = st.columns(4)
-        l1.metric("🎯 Target",          f"${trade['target_price']:,.4f}",
+        l1.metric("🎯 Target",          f"{cur}{trade['target_price']:,.4f}",
                   f"+{trade['profit_pct']:.2f}%", delta_color="normal")
         l2.metric("✅ Expected Profit",  f"₹{trade['expected_profit_inr']:,.0f}",
                   f"+{trade['profit_pct']:.2f}%", delta_color="normal")
-        l3.metric("🛑 Stop Loss",        f"${trade['stop_loss']:,.4f}",
+        l3.metric("🛑 Stop Loss",        f"{cur}{trade['stop_loss']:,.4f}",
                   f"-{trade['loss_pct']:.2f}%", delta_color="inverse")
         l4.metric("❌ Max Loss",          f"₹{trade['max_loss_inr']:,.0f}",
                   f"-{trade['loss_pct']:.2f}%", delta_color="inverse")
@@ -383,10 +411,10 @@ if run_single:
   Data Source   :  {data_source.upper()}
 
   ── PRICE LEVELS ─────────────────────────────────────
-  Current Price :  ${trade['current_price']:,.4f}
-  Entry Zone    :  ${trade['entry_zone_low']:,.4f}  →  ${trade['entry_zone_high']:,.4f}
-  Stop Loss     :  ${trade['stop_loss']:,.4f}   ← SET THIS FIRST on entry
-  Target        :  ${trade['target_price']:,.4f}   ← Take profit here
+  Current Price :  {cur}{trade['current_price']:,.4f}
+  Entry Zone    :  {cur}{trade['entry_zone_low']:,.4f}  →  {cur}{trade['entry_zone_high']:,.4f}
+  Stop Loss     :  {cur}{trade['stop_loss']:,.4f}   ← SET THIS FIRST on entry
+  Target        :  {cur}{trade['target_price']:,.4f}   ← Take profit here
 
   ── YOUR MONEY (₹) ───────────────────────────────────
   Capital       :  ₹{trade['capital_inr']:,.0f}
@@ -436,14 +464,15 @@ if run_single:
         st.subheader("📚 Your Track Record")
 
         if ticker_stats:
-            ts1, ts2, ts3, ts4, ts5, ts6 = st.columns(6)
+            ts1, ts2, ts3, ts4, ts5, ts6, ts7 = st.columns(7)
             ts1.metric("Total Signals", ticker_stats["total"])
             ts2.metric("✅ Wins",        ticker_stats["wins"])
             ts3.metric("❌ Losses",      ticker_stats["losses"])
-            ts4.metric("Win Rate",       f"{ticker_stats['win_rate']}%",
+            ts4.metric("⏰ Expired",     ticker_stats.get("expired", 0))
+            ts5.metric("Win Rate",       f"{ticker_stats['win_rate']}%",
                        delta_color="normal" if ticker_stats["win_rate"] >= 50 else "inverse")
-            ts5.metric("Avg Win",        f"+{ticker_stats['avg_win']}%")
-            ts6.metric("Avg Loss",       f"{ticker_stats['avg_loss']}%")
+            ts6.metric("Avg Win",        f"+{ticker_stats['avg_win']}%")
+            ts7.metric("Avg Loss",       f"{ticker_stats['avg_loss']}%")
 
         if past_signals:
             st.markdown("##### 🔁 Similar Past Setups")
@@ -453,9 +482,10 @@ if run_single:
                 ind  = ps["indicators"]
                 with st.expander(f"{icon} {ps['decision']} on {ps['id']} → {ps['outcome']} ({pct})", expanded=False):
                     c1, c2, c3, c4 = st.columns(4)
-                    c1.metric("Entry",  f"${ps['entry_price']:,.4f}")
-                    c2.metric("Target", f"${ps['target_price']:,.4f}")
-                    c3.metric("Stop",   f"${ps['stop_loss']:,.4f}")
+                    ps_cur = currency_label(ticker)
+                    c1.metric("Entry",  f"{ps_cur}{ps['entry_price']:,.4f}")
+                    c2.metric("Target", f"{ps_cur}{ps['target_price']:,.4f}")
+                    c3.metric("Stop",   f"{ps_cur}{ps['stop_loss']:,.4f}")
                     c4.metric("Result", pct, delta_color="normal" if ps['outcome_pct'] > 0 else "inverse")
                     st.caption(
                         f"Conditions: RSI {ind.get('rsi')} · "

@@ -24,7 +24,10 @@ def load():
 
 def save(mem):
     try:
-        json.dump(mem[-10:], open(FILE, "w"), indent=2)
+        tmp = FILE + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump(mem[-10:], f, indent=2)
+        os.replace(tmp, FILE)
     except Exception:
         pass
 

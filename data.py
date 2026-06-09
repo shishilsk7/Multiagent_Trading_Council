@@ -1,62 +1,136 @@
 """
-news.py — Relevant, deduplicated headline fetcher.
+data.py — OHLCV data fetcher via yfinance + advanced fetch_news.
 
-Fixes from v2:
-- Relevance scoring: headlines are ranked by how many asset-specific
-  keywords they contain. Unrelated articles are filtered out entirely.
-- Deduplication: same story from multiple outlets gets collapsed into one
-  using normalised title similarity (word overlap ratio).
-- Source tagging: each headline carries its outlet name so the LLM can
-  weight reputable sources vs tabloids.
-- Recency window still enforced (default 24h) — stale articles excluded.
-- Graceful fallback: returns [] on any network/parse error (never raises).
+Returns a DataFrame with attrs["source"] set to:
+  "yfinance" — live data fetched successfully
+  "mock"     — all sources failed (blocked by core.py)
 """
+
+import pandas as pd
+import numpy as np
+
+try:
+    import yfinance as yf
+    _YF_AVAILABLE = True
+except ImportError:
+    _YF_AVAILABLE = False
+
+
+# Period fallback chain: if narrow period returns too few candles, try wider ones
+_PERIOD_FALLBACKS = {
+    "1d":  ["1d", "2d", "5d"],
+    "3d":  ["3d", "5d"],
+    "7d":  ["7d", "10d"],
+    "30d": ["30d", "60d"],
+}
+
+
+def fetch_ticker_timeframe(ticker: str, period: str = "1d", interval: str = "5m") -> pd.DataFrame:
+    """
+    Fetch OHLCV data for a ticker with automatic period-widening retry.
+
+    Indian stocks (.NS/.BO) on sub-15m intervals frequently return sparse data
+    from yfinance — this retries with progressively wider periods until we get
+    at least 55 candles (minimum needed for indicators).
+
+    attrs["source"] = "yfinance" | "mock"
+    """
+    if not _YF_AVAILABLE:
+        df = _mock_df()
+        df.attrs["source"] = "mock"
+        return df
+
+    periods_to_try = _PERIOD_FALLBACKS.get(period, [period])
+
+    for p in periods_to_try:
+        try:
+            df = yf.download(
+                ticker,
+                period=p,
+                interval=interval,
+                auto_adjust=True,
+                progress=False,
+                threads=False,
+            )
+
+            # Flatten MultiIndex columns (yfinance quirk)
+            if isinstance(df.columns, pd.MultiIndex):
+                df.columns = df.columns.get_level_values(0)
+
+            if df.empty:
+                continue
+
+            df = df[["Open", "High", "Low", "Close", "Volume"]].copy()
+            df.dropna(inplace=True)
+
+            if len(df) >= 55:
+                df.attrs["source"] = "yfinance"
+                return df
+
+            # Got some data but not enough — try wider period
+            if len(df) >= 10 and p == periods_to_try[-1]:
+                # Last fallback — return what we have, indicators.py will handle it
+                df.attrs["source"] = "yfinance"
+                return df
+
+        except Exception as e:
+            print(f"data.py: yfinance failed for {ticker} period={p}: {e}")
+            continue
+
+    df = _mock_df()
+    df.attrs["source"] = "mock"
+    return df
+
+
+def _mock_df() -> pd.DataFrame:
+    """Minimal mock — core.py blocks this from being used for real decisions."""
+    import datetime
+    now    = datetime.datetime.now()
+    times  = [now - datetime.timedelta(minutes=5 * i) for i in range(60, 0, -1)]
+    rng    = np.random.default_rng(42)
+    closes = 100.0 + np.cumsum(rng.normal(0, 0.5, 60))
+    return pd.DataFrame({
+        "Open":   closes * 0.999,
+        "High":   closes * 1.002,
+        "Low":    closes * 0.998,
+        "Close":  closes,
+        "Volume": rng.integers(1000, 5000, 60).astype(float),
+    }, index=times)
+
+
+
+# ══════════════════════════════════════════════════════════════════════
+# Advanced fetch_news — relevance-scored, deduplicated, source-tagged
+# ══════════════════════════════════════════════════════════════════════
 
 import re
 import time
 from datetime import datetime, timedelta, timezone
 import feedparser
 
-
-# ── Keyword sets per asset class ───────────────────────────────────
-# Any headline containing at least one of these passes the relevance gate.
-# Keys map to what get_news_query() returns (loose match on the query words).
-
 _CRYPTO_KEYWORDS = {
     "bitcoin", "btc", "ethereum", "eth", "solana", "sol", "bnb", "xrp",
     "ripple", "crypto", "blockchain", "defi", "altcoin", "stablecoin",
     "coinbase", "binance", "sec", "etf", "halving", "on-chain",
 }
-
 _GOLD_KEYWORDS = {
     "gold", "silver", "gld", "slv", "bullion", "precious metal",
     "comex", "spot price", "safe haven", "inflation", "fed",
 }
-
 _INDIA_KEYWORDS = {
     "nse", "bse", "nifty", "sensex", "sebi", "rbi", "rupee", "inr",
     "india", "indian", "mumbai", "delhi", "quarter", "q1", "q2", "q3", "q4",
 }
-
 _US_TECH_KEYWORDS = {
     "nasdaq", "s&p", "earnings", "revenue", "guidance", "ai", "chips",
     "semiconductor", "cloud", "quarter", "beat", "miss", "forecast",
 }
 
 
-def _build_keyword_set(query: str) -> set[str]:
-    """
-    Build a relevance keyword set from the news query string.
-    We extract the company/asset name tokens and supplement with class keywords.
-    """
+def _build_keyword_set(query: str) -> set:
     query_lower = query.lower()
     tokens = set(re.findall(r'\w+', query_lower))
-
-    # Remove generic filler words that appear in every query
-    filler = {"stock", "price", "today", "india", "nse", "bse", "crypto"}
-    tokens -= filler
-
-    # Merge with class-specific keywords
+    tokens -= {"stock", "price", "today", "india", "nse", "bse", "crypto"}
     if any(c in query_lower for c in ["btc", "eth", "sol", "bnb", "xrp", "crypto"]):
         tokens |= _CRYPTO_KEYWORDS
     if any(c in query_lower for c in ["gold", "silver", "gld", "slv"]):
@@ -65,31 +139,19 @@ def _build_keyword_set(query: str) -> set[str]:
         tokens |= _INDIA_KEYWORDS
     if any(c in query_lower for c in ["nvda", "aapl", "msft", "googl", "meta", "amzn", "tsla"]):
         tokens |= _US_TECH_KEYWORDS
-
     return tokens
 
 
-def _relevance_score(title: str, keywords: set[str]) -> int:
-    """
-    Count how many keywords appear in the headline title.
-    Returns 0 for completely unrelated articles.
-    """
-    title_words = set(re.findall(r'\w+', title.lower()))
-    return len(title_words & keywords)
+def _relevance_score(title: str, keywords: set) -> int:
+    return len(set(re.findall(r'\w+', title.lower())) & keywords)
 
 
 def _normalise_title(title: str) -> str:
-    """Strip punctuation, lowercase, remove source attribution."""
-    # Google News appends " - Source Name" — remove it
     title = re.sub(r'\s*[-–]\s*[^-–]{3,40}$', '', title)
     return re.sub(r'[^\w\s]', '', title.lower()).strip()
 
 
-def _is_duplicate(title: str, seen: list[str], threshold: float = 0.65) -> bool:
-    """
-    Check if this title is substantially similar to any already-seen title.
-    Uses word-overlap Jaccard similarity.
-    """
+def _is_duplicate(title: str, seen: list, threshold: float = 0.65) -> bool:
     words_a = set(_normalise_title(title).split())
     if not words_a:
         return False
@@ -116,13 +178,9 @@ def _entry_is_fresh(entry, max_age_hours: int) -> bool:
 
 
 def _format_entry(entry) -> str:
-    """Format a feed entry as 'Headline (Source, timestamp)'."""
     title = entry.title.strip()
-
-    # Extract source from Google News title format "Story — Source"
     source_match = re.search(r'[-–]\s*([^-–]{3,40})$', title)
     source = source_match.group(1).strip() if source_match else "Unknown"
-
     published = getattr(entry, "published_parsed", None)
     if published:
         try:
@@ -132,8 +190,6 @@ def _format_entry(entry) -> str:
             stamp = "recent"
     else:
         stamp = "recent"
-
-    # Remove source from title for clean display
     clean_title = re.sub(r'\s*[-–]\s*[^-–]{3,40}$', '', title).strip()
     return f"{clean_title} ({source}, {stamp})"
 
@@ -143,59 +199,41 @@ def fetch_news(
     max_items: int = 6,
     max_age_hours: int = 24,
     min_relevance: int = 1,
-) -> list[str]:
+) -> list:
     """
-    Fetch relevant, deduplicated headlines for a given query.
-
-    Args:
-        query:         Search query (from get_news_query)
-        max_items:     Maximum number of headlines to return
-        max_age_hours: Only include headlines this fresh
-        min_relevance: Minimum keyword hits required (1 = at least 1 match)
-
-    Returns:
-        List of formatted headline strings, empty list on failure.
+    Fetch relevant, deduplicated, source-tagged headlines.
+    Returns [] on any failure — never raises.
     """
     feed_url = f"https://news.google.com/rss/search?q={query.replace(' ', '+')}&hl=en-US&gl=US&ceid=US:en"
-
     try:
         feed = feedparser.parse(feed_url, request_headers={"User-Agent": "Mozilla/5.0"})
     except Exception as e:
-        print(f"news.py: feedparser failed for query '{query}': {e}")
+        print(f"data.py: feedparser failed for '{query}': {e}")
         return []
 
     if not feed.entries:
         return []
 
     keywords = _build_keyword_set(query)
-    seen_normalised: list[str] = []
-    results: list[tuple[int, str]] = []  # (relevance_score, formatted_headline)
+    seen_normalised: list = []
+    results: list = []
 
     for entry in feed.entries:
-        if len(results) >= max_items * 3:  # fetch extra for dedup/filter
+        if len(results) >= max_items * 3:
             break
-
         title = getattr(entry, "title", "").strip()
         if not title or len(title) < 10:
             continue
-
-        # Recency gate
         if not _entry_is_fresh(entry, max_age_hours):
             continue
-
-        # Relevance gate
         score = _relevance_score(title, keywords)
         if score < min_relevance:
             continue
-
-        # Deduplication gate
         norm = _normalise_title(title)
         if _is_duplicate(norm, seen_normalised):
             continue
-
         seen_normalised.append(norm)
         results.append((score, _format_entry(entry)))
 
-    # Sort by relevance (highest first), return top N
     results.sort(key=lambda x: x[0], reverse=True)
-    return [headline for _, headline in results[:max_items]]
+    return [h for _, h in results[:max_items]]

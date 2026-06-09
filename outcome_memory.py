@@ -9,7 +9,7 @@ Flow:
 
 import json
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 FILE = "outcome_memory.json"
 
@@ -25,7 +25,10 @@ def _load():
 
 def _save(data):
     try:
-        json.dump(data, open(FILE, "w"), indent=2)
+        tmp = FILE + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump(data, f, indent=2)
+        os.replace(tmp, FILE)
     except Exception:
         pass
 
@@ -65,19 +68,38 @@ def record_signal(ticker, decision, entry_price, stop_loss, target_price,
     _save(data)
 
 
-def update_outcome(ticker, current_price):
+PENDING_EXPIRY_DAYS = 7
+
+
+def update_outcome(ticker, current_price, expiry_days=PENDING_EXPIRY_DAYS):
     """
     Check pending signals for ticker and mark outcome if target/stop hit.
-    Called automatically at the start of each analysis.
+    Also expires signals older than expiry_days that never hit target or stop.
     """
     data = _load()
     if ticker not in data:
         return
 
     changed = False
+    now     = datetime.now(timezone.utc)
+
     for rec in data[ticker]:
         if rec["outcome"] is not None:
-            continue  # already resolved
+            continue
+
+        # Expire stale pending signals
+        try:
+            recorded_at = datetime.fromisoformat(rec["timestamp"])
+            age_days    = (now - recorded_at).days
+        except Exception:
+            age_days = 0
+
+        if age_days >= expiry_days:
+            rec["outcome"]      = f"EXPIRED ⏰ ({age_days}d — no hit)"
+            rec["outcome_pct"]  = 0.0
+            rec["outcome_time"] = now.isoformat()
+            changed = True
+            continue
 
         entry  = rec["entry_price"]
         target = rec["target_price"]
@@ -94,14 +116,14 @@ def update_outcome(ticker, current_price):
                   else ((entry - target) / entry * 100)
             rec["outcome"]      = "TARGET HIT ✅"
             rec["outcome_pct"]  = round(pct, 2)
-            rec["outcome_time"] = datetime.now(timezone.utc).isoformat()
+            rec["outcome_time"] = now.isoformat()
             changed = True
         elif hit_stop:
             pct = ((stop - entry) / entry * 100) if dec == "BUY" \
                   else ((entry - stop) / entry * 100)
             rec["outcome"]      = "STOP HIT ❌"
             rec["outcome_pct"]  = round(pct, 2)
-            rec["outcome_time"] = datetime.now(timezone.utc).isoformat()
+            rec["outcome_time"] = now.isoformat()
             changed = True
 
     if changed:
@@ -144,24 +166,27 @@ def get_similar_past_signals(ticker, decision, rsi, macd_hist, sr_zone, n=3):
 
 
 def get_ticker_stats(ticker):
-    """Win rate and average return for a ticker."""
+    """Win rate and average return for a ticker. Excludes expired signals."""
     data = _load()
     records = [r for r in data.get(ticker, []) if r["outcome"] is not None]
 
     if not records:
         return None
 
-    wins   = [r for r in records if "TARGET" in r["outcome"]]
-    losses = [r for r in records if "STOP"   in r["outcome"]]
+    resolved = [r for r in records if "EXPIRED" not in r["outcome"]]
+    wins     = [r for r in resolved if "TARGET" in r["outcome"]]
+    losses   = [r for r in resolved if "STOP"   in r["outcome"]]
+    expired  = [r for r in records  if "EXPIRED" in r["outcome"]]
 
-    win_rate   = len(wins) / len(records) * 100
-    avg_win    = sum(r["outcome_pct"] for r in wins)   / len(wins)   if wins   else 0
-    avg_loss   = sum(r["outcome_pct"] for r in losses) / len(losses) if losses else 0
+    win_rate = len(wins) / len(resolved) * 100 if resolved else 0
+    avg_win  = sum(r["outcome_pct"] for r in wins)   / len(wins)   if wins   else 0
+    avg_loss = sum(r["outcome_pct"] for r in losses) / len(losses) if losses else 0
 
     return {
-        "total":    len(records),
+        "total":    len(resolved),
         "wins":     len(wins),
         "losses":   len(losses),
+        "expired":  len(expired),
         "win_rate": round(win_rate, 1),
         "avg_win":  round(avg_win, 2),
         "avg_loss": round(avg_loss, 2),

@@ -10,9 +10,8 @@ Upgrades from v1:
 """
 
 import concurrent.futures
-from data import fetch_ticker_timeframe
+from data import fetch_ticker_timeframe, fetch_news
 from indicators import add_indicators, interpret_patterns, sr_zone, volume_state, trend_strength
-from news import fetch_news
 from llm import ask_llm
 from agents import technical_agent, momentum_agent, news_agent, risk_agent
 from decision import decide
@@ -108,14 +107,23 @@ def analyze_wait_scenario(latest, tech, mom, news_text, risk_text):
 
 def _run_llm_agents_parallel(latest, patterns, sr, vol, trend_str, mem_summary, headlines, ticker):
     """Run all 4 LLM agents in parallel using threads."""
+    current_price = float(latest["Close"])
+    support       = float(latest.get("support", 0)) or None
+    resistance    = float(latest.get("resistance", 0)) or None
+
     prompts = {
         "technical": technical_agent(latest, patterns, sr, vol, trend_str, mem_summary),
         "momentum":  momentum_agent(latest),
-        "news":      news_agent(headlines, ticker),
+        "news":      news_agent(headlines, ticker,
+                                current_price=current_price,
+                                sr_zone=sr,
+                                support=support,
+                                resistance=resistance),
         "risk":      risk_agent(latest, vol, ticker),
     }
 
-    results = {}
+    results  = {}
+    failures = {}
     with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
         futures = {
             executor.submit(ask_llm, role, prompt): role
@@ -126,7 +134,16 @@ def _run_llm_agents_parallel(latest, patterns, sr, vol, trend_str, mem_summary, 
             try:
                 results[role] = future.result()
             except Exception as e:
-                results[role] = f"WAIT (agent error: {e})"
+                failures[role] = str(e)
+                results[role] = "WAIT"
+
+    if failures:
+        failed_list = ", ".join(f"{r} ({e})" for r, e in failures.items())
+        try:
+            import streamlit as st
+            st.warning(f"⚠️ {len(failures)} agent(s) failed — results degraded: {failed_list}")
+        except Exception:
+            print(f"[AGENT ERROR] {len(failures)} agent(s) failed: {failed_list}")
 
     return (
         results.get("technical", "WAIT"),

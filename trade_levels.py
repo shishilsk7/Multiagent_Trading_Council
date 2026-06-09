@@ -7,35 +7,34 @@ trade_levels.py — ATR-aware, asset-class-adaptive trade sizing
 """
 
 import requests
+import time
 
 _cached_rate = None
+_cached_rate_ts = 0.0
+_RATE_TTL = 3600  # refresh every 1 hour
 
 
 def get_usd_inr():
-    global _cached_rate
-    if _cached_rate is not None:
+    global _cached_rate, _cached_rate_ts
+    if _cached_rate is not None and (time.time() - _cached_rate_ts) < _RATE_TTL:
         return _cached_rate
     try:
-        r = requests.get(
-            "https://open.er-api.com/v6/latest/USD",
-            timeout=3
-        )
+        r = requests.get("https://open.er-api.com/v6/latest/USD", timeout=3)
         if r.status_code == 200:
             _cached_rate = r.json()["rates"]["INR"]
+            _cached_rate_ts = time.time()
             return _cached_rate
     except Exception:
         pass
     try:
-        r = requests.get(
-            "https://api.exchangerate-api.com/v4/latest/USD",
-            timeout=3
-        )
+        r = requests.get("https://api.exchangerate-api.com/v4/latest/USD", timeout=3)
         if r.status_code == 200:
             _cached_rate = r.json()["rates"]["INR"]
+            _cached_rate_ts = time.time()
             return _cached_rate
     except Exception:
         pass
-    return 84.0
+    return _cached_rate if _cached_rate is not None else 84.0
 
 
 def inr(usd_amount, rate):
