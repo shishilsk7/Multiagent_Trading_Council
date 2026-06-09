@@ -16,34 +16,68 @@ except ImportError:
     _YF_AVAILABLE = False
 
 
-# Period fallback chain: if narrow period returns too few candles, try wider ones
-_PERIOD_FALLBACKS = {
-    "1d":  ["2d", "5d", "7d"],
-    "3d":  ["5d", "7d", "10d"],
-    "7d":  ["7d", "10d", "14d"],
-    "30d": ["30d", "60d"],
+# Minimum candles needed for all indicators (EMA50 + ADX14)
+_MIN_CANDLES = 55
+
+# How many candles per day each interval produces (conservative estimate for NSE)
+_CANDLES_PER_DAY = {
+    "1m":  370,   # 6.25h × 60 = 375, minus gaps
+    "5m":  74,    # 6.25h × 12
+    "15m": 25,    # 6.25h × 4
+    "1h":  6,     # 6.25h
+    "1d":  1,
 }
 
-_MIN_CANDLES = 50  # EMA50 needs 50, ADX14 needs 14 — 50 covers both
+# yfinance max period allowed per interval
+_MAX_PERIOD = {
+    "1m":  "7d",
+    "5m":  "60d",
+    "15m": "60d",
+    "1h":  "730d",
+    "1d":  "max",
+}
+
+
+def _days_needed(interval: str) -> int:
+    """Calculate how many days needed to get _MIN_CANDLES candles."""
+    cpd = _CANDLES_PER_DAY.get(interval, 10)
+    # Add 40% buffer for weekends/holidays/gaps
+    return int((_MIN_CANDLES / cpd) * 1.4) + 1
 
 
 def fetch_ticker_timeframe(ticker: str, period: str = "1d", interval: str = "5m") -> pd.DataFrame:
     """
-    Fetch OHLCV data for a ticker with automatic period-widening retry.
-
-    Indian stocks (.NS/.BO) on sub-15m intervals frequently return sparse data
-    from yfinance — retries with progressively wider periods until we get
-    at least _MIN_CANDLES candles.
-
-    attrs["source"] = "yfinance" | "mock"
+    Fetch OHLCV with guaranteed minimum candles.
+    If requested period gives too few candles, automatically widens until
+    we have enough — without changing the interval (preserving signal quality).
     """
     if not _YF_AVAILABLE:
         df = _mock_df()
         df.attrs["source"] = "mock"
         return df
 
-    # Always try the requested period first, then fallbacks
-    periods_to_try = [period] + [p for p in _PERIOD_FALLBACKS.get(period, []) if p != period]
+    # Build period candidates: requested first, then widen to guarantee enough candles
+    days_req  = _days_needed(interval)
+    max_p     = _MAX_PERIOD.get(interval, "60d")
+
+    # Parse requested period into days
+    _p_days = {"1d": 1, "2d": 2, "3d": 3, "5d": 5, "7d": 7, "10d": 10,
+               "14d": 14, "30d": 30, "60d": 60}
+    req_days = _p_days.get(period, 1)
+
+    # Candidate periods: start from max(requested, needed), step up
+    candidates = []
+    for p, d in sorted(_p_days.items(), key=lambda x: x[1]):
+        if d >= req_days and d >= max(req_days, 1):
+            candidates.append(p)
+        if len(candidates) >= 5:
+            break
+    # Always include max as final fallback
+    if max_p not in candidates:
+        candidates.append(max_p)
+    # Deduplicate preserving order
+    seen = set()
+    periods_to_try = [p for p in candidates if not (p in seen or seen.add(p))]
 
     for p in periods_to_try:
         try:
@@ -55,35 +89,23 @@ def fetch_ticker_timeframe(ticker: str, period: str = "1d", interval: str = "5m"
                 progress=False,
                 threads=False,
             )
-
-            # Flatten MultiIndex columns (yfinance quirk)
             if isinstance(df.columns, pd.MultiIndex):
                 df.columns = df.columns.get_level_values(0)
-
             if df.empty:
                 continue
-
             df = df[["Open", "High", "Low", "Close", "Volume"]].copy()
             df.dropna(inplace=True)
-
             if len(df) >= _MIN_CANDLES:
                 df.attrs["source"] = "yfinance"
                 return df
-
         except Exception as e:
-            print(f"data.py: yfinance failed for {ticker} period={p}: {e}")
+            print(f"data.py: {ticker} period={p} interval={interval} failed: {e}")
             continue
 
-    # Last resort: try a daily interval with 60d period — works for almost all assets
+    # Nuclear fallback: daily candles always work
     try:
-        df = yf.download(
-            ticker,
-            period="60d",
-            interval="1d",
-            auto_adjust=True,
-            progress=False,
-            threads=False,
-        )
+        df = yf.download(ticker, period="60d", interval="1d",
+                         auto_adjust=True, progress=False, threads=False)
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = df.columns.get_level_values(0)
         if not df.empty:
@@ -93,7 +115,7 @@ def fetch_ticker_timeframe(ticker: str, period: str = "1d", interval: str = "5m"
                 df.attrs["source"] = "yfinance"
                 return df
     except Exception as e:
-        print(f"data.py: fallback 60d/1d failed for {ticker}: {e}")
+        print(f"data.py: nuclear fallback failed for {ticker}: {e}")
 
     df = _mock_df()
     df.attrs["source"] = "mock"
