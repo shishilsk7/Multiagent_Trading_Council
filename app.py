@@ -147,7 +147,7 @@ TIMEFRAME_MAP = {
     "1 Month": ("30d", "1d"),
 }
 period, interval_default = TIMEFRAME_MAP.get(timeframe, ("1d", "5m"))
-final_interval = interval or interval_default
+final_interval = interval_default  # always use TIMEFRAME_MAP — manual override causes mismatches
 
 col1, col2 = st.columns([3, 1])
 run_single = col1.button(f"🔍 Analyse {asset_name}", type="primary", use_container_width=True)
