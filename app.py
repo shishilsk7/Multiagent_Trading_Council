@@ -5,117 +5,116 @@ import streamlit as st
 load_dotenv(override=True)
 
 st.set_page_config(
-    page_title="Trading Intelligence Platform",
+    page_title="Trading Council",
     layout="wide",
     initial_sidebar_state="expanded",
     page_icon="📈",
 )
 
-# ── CSS ─────────────────────────────────────────────────────────
 st.markdown("""
 <style>
-[data-testid="metric-container"] { background:#1e1e2e; border-radius:8px; padding:12px; }
-.stExpander { border:1px solid #333 !important; border-radius:8px !important; }
+[data-testid="metric-container"] {
+    background: #1e1e2e;
+    border-radius: 8px;
+    padding: 12px;
+}
+.stExpander { border: 1px solid #333 !important; border-radius: 8px !important; }
+.risk-banner {
+    background: #3d1a1a;
+    border-left: 4px solid #ef4444;
+    padding: 12px 16px;
+    border-radius: 4px;
+    margin: 8px 0;
+}
+.vote-bar { font-size: 1.1em; letter-spacing: 2px; }
 </style>
 """, unsafe_allow_html=True)
 
-# ── Safe imports (no network calls at import time) ───────────────
 from stocks import UNIVERSE, CATEGORIES, ticker_label
 
-# ── Header ───────────────────────────────────────────────────────
-st.title("📈 AI Trading Intelligence Platform")
-st.markdown("*Multi-Agent Council · Technical + Momentum + News + Risk*")
+st.title("📈 AI Trading Council")
+st.markdown("*Technical · Momentum · News · Risk — Real-money grade analysis*")
 
 api_ok = bool(os.getenv("OPENROUTER_API_KEY"))
-st.caption("🔑 API: " + ("✅ Connected" if api_ok else "⚠️ Offline Mode"))
+status = "✅ API Connected" if api_ok else "⚠️ API Key Missing — set OPENROUTER_API_KEY"
+st.caption(f"🔑 {status}")
 st.divider()
 
+# ── Sidebar ──────────────────────────────────────────────────────────
 with st.sidebar:
     st.header("⚙️ Settings")
 
-    # Asset picker
-    st.subheader("🎯 Asset Selection")
-    cat_filter = st.selectbox("Filter by Category", ["All"] + CATEGORIES)
-
-    filtered = {
-        k: v for k, v in UNIVERSE.items()
-        if cat_filter == "All" or v[1] == cat_filter
-    }
-    ticker_options = list(filtered.keys())
-    ticker_labels  = [ticker_label(t) for t in ticker_options]
-
-    selected_label = st.selectbox("Select Asset", ticker_labels)
-    ticker = ticker_options[ticker_labels.index(selected_label)]
+    st.subheader("🎯 Asset")
+    cat_filter = st.selectbox("Category", ["All"] + CATEGORIES)
+    filtered   = {k: v for k, v in UNIVERSE.items() if cat_filter == "All" or v[1] == cat_filter}
+    t_opts     = list(filtered.keys())
+    t_labels   = [ticker_label(t) for t in t_opts]
+    sel_label  = st.selectbox("Asset", t_labels)
+    ticker     = t_opts[t_labels.index(sel_label)]
     asset_name, asset_cat = UNIVERSE[ticker]
-
     st.info(f"**{asset_name}** | {asset_cat}")
 
-    # Multi-asset scan
     st.divider()
-    st.subheader("🔍 Quick Multi-Scan")
-    scan_enabled = st.checkbox("Enable Multi-Asset Scan")
+    st.subheader("🔍 Multi-Scan")
+    scan_enabled = st.checkbox("Enable")
+    scan_tickers = []
     if scan_enabled:
         scan_tickers = st.multiselect(
-            "Assets to scan",
-            options=ticker_options,
-            default=ticker_options[:4],
+            "Assets to scan", options=t_opts, default=t_opts[:4],
             format_func=lambda t: f"{t} – {UNIVERSE[t][0]}",
         )
 
-    # Timeframe
     st.divider()
     st.subheader("📊 Timeframe")
     timeframe = st.selectbox(
-        "Historical Period",
+        "Period",
         ["1 Hour", "4 Hours", "1 Day", "3 Days", "1 Week", "1 Month"],
         index=2,
     )
-    interval = st.selectbox("Data Interval", ["1m", "5m", "15m", "1h", "1d"], index=1)
+    interval = st.selectbox("Interval", ["1m", "5m", "15m", "1h", "1d"], index=1)
 
-    # Risk
     st.divider()
     st.subheader("💰 Risk Management")
-    capital = st.number_input("Your Capital (₹)", min_value=1000.0, value=50_000.0, step=5_000.0)
-    risk_percent = st.slider("Risk Per Trade (%)", 0.5, 10.0, 1.0, 0.25)
-    st.info(f"💡 Max risk/trade: **₹{capital * risk_percent / 100:,.0f}**")
+    capital      = st.number_input("Capital (₹)", min_value=1000.0, value=50_000.0, step=5_000.0)
+    risk_percent = st.slider("Risk Per Trade (%)", 0.5, 5.0, 1.0, 0.25)
+    max_risk_inr = capital * risk_percent / 100
+    st.info(f"Max loss per trade: **₹{max_risk_inr:,.0f}**")
 
-    # Charts
     st.divider()
     st.subheader("📈 Live Chart")
     chart_src = st.radio("Provider", ["TradingView", "Binance", "Yahoo"])
+    sym = ticker.replace("-USD", "USD").replace("-", "")
     if chart_src == "TradingView":
-        sym = ticker.replace("-USD", "USD").replace("-", "")
         chart_url = f"https://www.tradingview.com/chart/?symbol={sym}"
     elif chart_src == "Binance":
-        sym = ticker.replace("-USD", "USDT").replace("-", "")
-        chart_url = f"https://www.binance.com/en/trade/{sym}"
+        bsym = ticker.replace("-USD", "USDT").replace("-", "")
+        chart_url = f"https://www.binance.com/en/trade/{bsym}"
     else:
         chart_url = f"https://finance.yahoo.com/quote/{ticker}"
     st.link_button(f"📊 Open {chart_src}", chart_url, use_container_width=True)
 
-# ── Live Snapshot ─────────────────────────────────────────────────
-st.subheader(f"📊 {asset_name} ({ticker}) — Live Snapshot")
+# ── Live Snapshot ─────────────────────────────────────────────────────
+st.subheader(f"📊 {asset_name} ({ticker})")
 try:
     from data import fetch_ticker_timeframe
-    with st.spinner("Fetching live price..."):
+    with st.spinner("Fetching price..."):
         snap = fetch_ticker_timeframe(ticker, period="1d", interval="5m")
-    if not snap.empty:
+    if not snap.empty and snap.attrs.get("source") != "mock":
         cp  = snap.iloc[-1]["Close"]
         chg = cp - snap.iloc[0]["Close"]
         pct = chg / snap.iloc[0]["Close"] * 100
         c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Current Price", f"${cp:,.2f}", f"{pct:+.2f}%")
-        c2.metric("24h High",      f"${snap['High'].max():,.2f}")
-        c3.metric("24h Low",       f"${snap['Low'].min():,.2f}")
-        c4.metric("24h Volume",    f"{snap['Volume'].sum()/1e6:.1f}M")
+        c1.metric("Price",     f"${cp:,.4f}", f"{pct:+.2f}%")
+        c2.metric("24h High",  f"${snap['High'].max():,.4f}")
+        c3.metric("24h Low",   f"${snap['Low'].min():,.4f}")
+        c4.metric("Volume",    f"{snap['Volume'].sum()/1e6:.2f}M")
     else:
-        st.info("Market data unavailable — click Analyse to proceed.")
+        st.warning("⚠️ Live price unavailable. Check connection before analysing.")
 except Exception:
-    st.info("Market data unavailable — click Analyse to proceed.")
+    st.warning("⚠️ Live price unavailable.")
 
-# ── Analysis ──────────────────────────────────────────────────────
+# ── Action Buttons ────────────────────────────────────────────────────
 st.divider()
-
 TIMEFRAME_MAP = {
     "1 Hour":  ("1d", "1m"),
     "4 Hours": ("1d", "5m"),
@@ -127,346 +126,355 @@ TIMEFRAME_MAP = {
 period, interval_default = TIMEFRAME_MAP.get(timeframe, ("1d", "5m"))
 final_interval = interval or interval_default
 
-col_btn1, col_btn2 = st.columns([3, 1])
-run_single = col_btn1.button(
-    f"🔍 Analyse {asset_name} ({ticker})", type="primary", use_container_width=True
-)
-run_scan   = col_btn2.button("🔄 Multi-Scan", use_container_width=True) if scan_enabled else False
+col1, col2 = st.columns([3, 1])
+run_single = col1.button(f"🔍 Analyse {asset_name}", type="primary", use_container_width=True)
+run_scan   = col2.button("🔄 Multi-Scan", use_container_width=True) if scan_enabled else False
+
+# ── Risk Disclaimer ───────────────────────────────────────────────────
+st.markdown("""
+<div class="risk-banner">
+⚠️ <strong>Risk Disclosure:</strong> This tool is for decision support only.
+All trades carry risk of loss. Never invest more than you can afford to lose.
+Past signal performance does not guarantee future results.
+Always set stop-losses before entering any trade.
+</div>
+""", unsafe_allow_html=True)
 
 
-# ──────────────────────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════
 # MULTI-SCAN
-# ──────────────────────────────────────────────────────────────────
-if run_scan and scan_enabled:
+# ══════════════════════════════════════════════════════════════════════
+if run_scan and scan_enabled and scan_tickers:
     from core import run_enhanced_analysis
-    st.subheader("🔄 Multi-Asset Scan Results")
-    scan_results = []
+    import pandas as pd
 
+    st.subheader("🔄 Multi-Asset Scan")
+    scan_results = []
     prog = st.progress(0, text="Scanning...")
+
     for i, t in enumerate(scan_tickers):
         prog.progress((i + 1) / len(scan_tickers), text=f"Scanning {t}…")
         try:
             r = run_enhanced_analysis(
                 ticker=t, period=period, interval=final_interval,
-                capital=capital, risk_percent=risk_percent
+                capital=capital, risk_percent=risk_percent,
             )
+            trade = r.get("trade") or {}
             scan_results.append({
                 "Ticker":     t,
                 "Asset":      UNIVERSE[t][0],
-                "Category":   UNIVERSE[t][1],
                 "Signal":     r["decision"],
-                "Confidence": f"{r['confidence']}%",
-                "Price":      f"${r['current_price']:,.2f}",
+                "Conf %":     f"{r['confidence']}%",
+                "Price":      f"${r['current_price']:,.4f}",
                 "RSI":        f"{r['rsi']:.1f}",
                 "ADX":        f"{r['adx']:.1f}",
                 "Zone":       r["sr_zone"],
+                "R:R":        f"1:{trade.get('risk_reward_ratio','—')}" if trade else "—",
+                "Target":     f"${trade['target_price']:,.4f}" if trade else "—",
+                "Stop":       f"${trade['stop_loss']:,.4f}" if trade else "—",
             })
         except Exception as e:
             scan_results.append({
                 "Ticker": t, "Asset": UNIVERSE[t][0],
-                "Category": UNIVERSE[t][1],
-                "Signal": "ERROR", "Confidence": "—",
-                "Price": "—", "RSI": "—", "ADX": "—", "Zone": str(e)[:40],
+                "Signal": "ERROR", "Conf %": "—", "Price": "—",
+                "RSI": "—", "ADX": "—", "Zone": str(e)[:50],
+                "R:R": "—", "Target": "—", "Stop": "—",
             })
     prog.empty()
 
-    import pandas as pd
     df_scan = pd.DataFrame(scan_results)
 
     def color_signal(val):
-        if val == "BUY":  return "background-color:#1a4731; color:#4ade80"
-        if val == "SELL": return "background-color:#4a1a1a; color:#f87171"
-        if val == "WAIT": return "background-color:#3a3a1a; color:#facc15"
+        if val == "BUY":   return "background-color:#1a4731; color:#4ade80"
+        if val == "SELL":  return "background-color:#4a1a1a; color:#f87171"
+        if val == "WAIT":  return "background-color:#3a3a1a; color:#facc15"
+        if val == "ERROR": return "background-color:#2a1a2a; color:#c084fc"
         return ""
 
     st.dataframe(
         df_scan.style.applymap(color_signal, subset=["Signal"]),
-        use_container_width=True, hide_index=True
+        use_container_width=True, hide_index=True,
     )
 
     buys  = [r for r in scan_results if r["Signal"] == "BUY"]
     sells = [r for r in scan_results if r["Signal"] == "SELL"]
     if buys:
-        st.success("🟢 **BUY signals:** " + ", ".join(f"{r['Ticker']} ({r['Confidence']})" for r in buys))
+        st.success("🟢 BUY: " + "  |  ".join(f"{r['Ticker']} {r['Conf %']} R:R {r['R:R']}" for r in buys))
     if sells:
-        st.error("🔴 **SELL signals:** " + ", ".join(f"{r['Ticker']} ({r['Confidence']})" for r in sells))
+        st.error("🔴 SELL: " + "  |  ".join(f"{r['Ticker']} {r['Conf %']} R:R {r['R:R']}" for r in sells))
     st.divider()
 
 
-# ──────────────────────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════
 # SINGLE ASSET ANALYSIS
-# ──────────────────────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════
 if run_single:
     from core import run_enhanced_analysis
 
-    with st.spinner(f"🤖 Analysing {asset_name} ({ticker}) — {timeframe} @ {final_interval}…"):
+    with st.spinner(f"🤖 Analysing {asset_name} — running 4 agents in parallel…"):
         try:
             result = run_enhanced_analysis(
                 ticker=ticker, period=period, interval=final_interval,
                 capital=capital, risk_percent=risk_percent,
             )
         except Exception as e:
-            st.error(f"Analysis error: {e}")
+            st.error(f"❌ Analysis failed: {e}")
             st.stop()
 
     decision      = result["decision"]
     conf          = result["confidence"]
     trade         = result["trade"]
     wait_analysis = result["wait_analysis"]
-    tech          = result["technical"]
-    mom           = result["momentum"]
-    news_text     = result["news"]
-    risk_agent_r  = result["risk"]
-    headlines     = result["headlines"]
-    mem           = result["memory"]
-    sr            = result["sr_zone"]
-    trend_str     = result["trend_str"]
-    current_price = result["current_price"]
+    breakdown     = result.get("vote_breakdown", {})
     data_source   = result["data_source"]
 
-    # Data source banner
-    if data_source == "mock":
-        st.warning("⚠️ Using simulated data — live APIs unavailable")
+    st.success(f"✅ Live data: **{data_source.upper()}** · {result['data_points']} candles · {timeframe} @ {final_interval}")
+
+    # ── Main Decision ──────────────────────────────────────────────
+    st.markdown("---")
+    st.markdown("## 🏛️ Council Decision")
+
+    d1, d2, d3, d4, d5 = st.columns(5)
+
+    if decision == "BUY":
+        d1.success("## 🟢 BUY")
+    elif decision == "SELL":
+        d1.error("## 🔴 SELL")
     else:
-        st.success(f"✅ Live data: **{data_source.upper()}** · {result['data_points']} candles")
+        d1.warning("## 🟡 WAIT")
 
-    # ── Council Decision ──────────────────────────────────────────
-    st.markdown("### 🏛️ Council Decision")
-    c1, c2, c3, c4, c5 = st.columns(5)
+    conf_label = "High 🔥" if conf >= 70 else ("Medium" if conf >= 50 else "Low ⚠️")
+    d2.metric("Confidence",  f"{conf}%", conf_label,
+              delta_color="normal" if conf >= 65 else ("off" if conf >= 50 else "inverse"))
+    d3.metric("Price",       f"${result['current_price']:,.4f}")
+    d4.metric("S/R Zone",    result["sr_zone"])
+    d5.metric("Trend",       result["trend_str"][:20])
 
-    with c1:
-        if decision == "BUY":
-            st.success(f"## 🟢 BUY")
-        elif decision == "SELL":
-            st.error(f"## 🔴 SELL")
-        else:
-            st.warning(f"## 🟡 WAIT")
-
-    c2.metric("Confidence",  f"{conf}%",
-              "High" if conf >= 70 else ("Medium" if conf >= 50 else "Low"),
-              delta_color="normal" if conf >= 70 else ("off" if conf >= 50 else "inverse"))
-    c3.metric("Price",       f"${current_price:,.2f}")
-    c4.metric("S/R Zone",    sr)
-    c5.metric("Trend",       trend_str[:18])
-
-    # Key indicators row
+    # Indicators row
     st.markdown("#### 📐 Key Indicators")
-    ki1, ki2, ki3, ki4, ki5 = st.columns(5)
-    ki1.metric("RSI(14)",   f"{result['rsi']:.1f}",
-               "Overbought" if result['rsi'] > 70 else ("Oversold" if result['rsi'] < 30 else "Normal"),
-               delta_color="inverse" if result['rsi'] > 70 else ("normal" if result['rsi'] < 30 else "off"))
-    ki2.metric("ADX",       f"{result['adx']:.1f}",
-               "Trending" if result['adx'] > 25 else "Ranging",
-               delta_color="normal" if result['adx'] > 25 else "off")
-    ki3.metric("ATR",       f"${result['atr']:.2f}")
-    ki4.metric("Timeframe", timeframe)
-    ki5.metric("Candles",   result["data_points"])
+    k1, k2, k3, k4, k5, k6 = st.columns(6)
+    rsi_v  = result["rsi"]
+    adx_v  = result["adx"]
+    atr_v  = result["atr"]
+    macd_v = result["macd_hist"]
 
-    # ── Signal Breakdown ─────────────────────────────────────────
+    k1.metric("RSI(14)",  f"{rsi_v:.1f}",
+              "⬆️ Overbought" if rsi_v > 70 else ("⬇️ Oversold" if rsi_v < 30 else "✅ Normal"),
+              delta_color="inverse" if rsi_v > 70 else ("normal" if rsi_v < 30 else "off"))
+    k2.metric("ADX",      f"{adx_v:.1f}",
+              "Trending" if adx_v > 25 else "Ranging",
+              delta_color="normal" if adx_v > 25 else "inverse")
+    k3.metric("ATR",      f"${atr_v:.4f}",
+              f"{(atr_v/result['current_price']*100):.2f}% of price")
+    k4.metric("MACD Hist", f"{macd_v:.5f}",
+              "▲ Bullish" if macd_v > 0 else "▼ Bearish",
+              delta_color="normal" if macd_v > 0 else "inverse")
+    k5.metric("Patterns", len(result.get("patterns", [])))
+    k6.metric("Candles",  result["data_points"])
+
+    # ── Vote Breakdown ─────────────────────────────────────────────
     st.divider()
-    st.markdown("### 🔬 Signal Breakdown — Why this decision?")
+    st.markdown("### 🔬 How the Decision Was Made")
 
     from decision import _parse_signal
     tech_sig = _parse_signal(result["technical"])
     mom_sig  = _parse_signal(result["momentum"])
-    rsi_v    = result["rsi"]
-    macd_v   = result["macd_hist"]
-    rsi_sig  = "🟢 BUY" if rsi_v < 40 else ("🔴 SELL" if rsi_v > 60 else "🟡 Neutral")
-    macd_sig = "🟢 BUY" if macd_v > 0 else "🔴 SELL"
     risk_u   = result["risk"].upper()
     risk_lbl = "🔴 High" if "RISK: HIGH" in risk_u else ("🟡 Medium" if "RISK: MEDIUM" in risk_u else "🟢 Low")
-    risk_act = "⛔ Avoid" if ("RISK: HIGH" in risk_u and "AVOID" in risk_u) else "✅ Trade"
+    risk_act = "⛔ AVOID" if ("RISK: HIGH" in risk_u and "AVOID" in risk_u) else "✅ Trade"
 
     sb1, sb2, sb3, sb4, sb5, sb6 = st.columns(6)
-    sb1.metric("Technical Agent", "🟢 BUY" if tech_sig=="BUY" else ("🔴 SELL" if tech_sig=="SELL" else "🟡 WAIT"), "×3 weight")
-    sb2.metric("Momentum Agent",  "🟢 BUY" if mom_sig=="BUY"  else ("🔴 SELL" if mom_sig=="SELL"  else "🟡 WAIT"), "×2 weight")
-    sb3.metric("RSI Signal",      rsi_sig,  f"{rsi_v:.1f}")
-    sb4.metric("MACD Signal",     macd_sig, f"{macd_v:.4f}")
-    sb5.metric("Risk Level",      risk_lbl)
-    sb6.metric("Risk Action",     risk_act)
+    sb1.metric("Technical",  "🟢 BUY" if tech_sig=="BUY" else ("🔴 SELL" if tech_sig=="SELL" else "🟡 WAIT"), "×3 weight")
+    sb2.metric("Momentum",   "🟢 BUY" if mom_sig=="BUY"  else ("🔴 SELL" if mom_sig=="SELL"  else "🟡 WAIT"), "×2 weight")
+    sb3.metric("RSI Signal", "🟢 BUY" if rsi_v < 40 else ("🔴 SELL" if rsi_v > 60 else "🟡 Neutral"), f"{rsi_v:.1f}")
+    sb4.metric("MACD",       "🟢 ▲" if macd_v > 0 else "🔴 ▼", f"{macd_v:.5f}")
+    sb5.metric("Risk Level", risk_lbl)
+    sb6.metric("Risk Action", risk_act)
 
-    # Vote tally
-    buy_v  = (3 if tech_sig=="BUY"  else 0) + (2 if mom_sig=="BUY"  else 0)
-    sell_v = (3 if tech_sig=="SELL" else 0) + (2 if mom_sig=="SELL" else 0)
-    ind_buy  = sum([rsi_v < 40, macd_v > 0])
-    ind_sell = sum([rsi_v > 60, macd_v < 0])
-    if ind_buy >= 2:    buy_v  += 2
-    elif ind_buy == 1:  buy_v  += 1
-    if ind_sell >= 2:   sell_v += 2
-    elif ind_sell == 1: sell_v += 1
+    # Vote bars with actual counts from breakdown
+    buy_v  = breakdown.get("total_buy", 0)
+    sell_v = breakdown.get("total_sell", 0)
+    veto   = breakdown.get("hard_veto", False)
+    reason = breakdown.get("reason", "")
 
-    bar_buy  = "🟩" * buy_v  + "⬜" * (7 - buy_v)
-    bar_sell = "🟥" * sell_v + "⬜" * (7 - sell_v)
+    bar_buy  = "🟩" * buy_v  + "⬜" * max(0, 7 - buy_v)
+    bar_sell = "🟥" * sell_v + "⬜" * max(0, 7 - sell_v)
+
     st.markdown(f"""
-| | Votes | Bar (max 7) |
+| | Votes | Visual (max 7) |
 |---|---|---|
-| 🟢 BUY  | **{buy_v}** | {bar_buy} |
-| 🔴 SELL | **{sell_v}** | {bar_sell} |
+| 🟢 BUY  | **{buy_v}/7** | <span class="vote-bar">{bar_buy}</span> |
+| 🔴 SELL | **{sell_v}/7** | <span class="vote-bar">{bar_sell}</span> |
 
-> Needs **3+ votes** to trigger · Final call: **{decision}** {"✅" if decision != "WAIT" else "⏸️"}
-""")
+**Decision logic:** {reason} {"| ⛔ Hard veto active" if veto else ""}
+> Threshold: 4+ votes = confident signal · 3 votes = borderline · <3 = WAIT
+""", unsafe_allow_html=True)
 
-    # ── Trading Plan ─────────────────────────────────────────────
+    # Patterns
+    patterns = result.get("patterns", [])
+    if patterns and patterns != ["No clear pattern"]:
+        st.markdown("**📊 Active Patterns:** " + "  ·  ".join(patterns))
+
+    # ── TRADE PLAN ─────────────────────────────────────────────────
     if trade:
         st.divider()
-        st.markdown("## 📊 Trading Plan")
+        st.markdown("## 📊 Trade Plan")
 
         rate = trade.get("usd_inr_rate", 84.0)
-        st.caption(f"💱 USD/INR rate used: ₹{rate:.2f}  |  Your capital: ₹{trade['capital_inr']:,.0f} (≈ ${trade['capital_usd']:,.0f})")
+        atr_used = trade.get("atr_used", 0)
+        st.caption(
+            f"💱 USD/INR: ₹{rate:.2f}  ·  "
+            f"Capital: ₹{trade['capital_inr']:,.0f} (≈ ${trade['capital_usd']:,.0f})  ·  "
+            f"Stop/Target based on ATR = ${atr_used:.4f}"
+        )
 
-        st.markdown("### ⏰ Entry Timing")
-        e1, e2 = st.columns(2)
-        e1.metric("Current Price",  f"${trade['current_price']:,.2f}")
-        e1.write(f"**Timing:** {trade['timing']}")
-        e2.metric("Entry Zone",
-                  f"${trade['entry_zone_low']:,.2f} – ${trade['entry_zone_high']:,.2f}")
+        # Entry
+        st.markdown("### ⏰ Entry")
+        e1, e2, e3 = st.columns(3)
+        e1.metric("Current Price",  f"${trade['current_price']:,.4f}")
+        e2.metric("Entry Zone",     f"${trade['entry_zone_low']:,.4f} → ${trade['entry_zone_high']:,.4f}")
+        e3.info(f"**⏱️ Timing:** {trade['timing']}")
 
-        st.markdown("### 💼 Position Sizing")
-        p1, p2, p3 = st.columns(3)
-        p1.metric("Capital Used",  f"₹{trade['capital_inr']:,.0f}")
-        p2.metric("Position Size", f"{trade['position_size']:.6f} units")
-        p3.metric("Entry Cost",    f"₹{trade['entry_cost_inr']:,.0f}")
+        # Levels
+        st.markdown("### 🎯 Levels & P&L")
+        l1, l2, l3, l4 = st.columns(4)
+        l1.metric("🎯 Target",          f"${trade['target_price']:,.4f}",
+                  f"+{trade['profit_pct']:.2f}%", delta_color="normal")
+        l2.metric("✅ Expected Profit",  f"₹{trade['expected_profit_inr']:,.0f}",
+                  f"+{trade['profit_pct']:.2f}%", delta_color="normal")
+        l3.metric("🛑 Stop Loss",        f"${trade['stop_loss']:,.4f}",
+                  f"-{trade['loss_pct']:.2f}%", delta_color="inverse")
+        l4.metric("❌ Max Loss",          f"₹{trade['max_loss_inr']:,.0f}",
+                  f"-{trade['loss_pct']:.2f}%", delta_color="inverse")
 
-        st.markdown("### 🎯 Expected Outcome")
-        o1, o2, o3, o4 = st.columns(4)
-        o1.metric("Target Price",   f"${trade['target_price']:,.2f}", f"+{trade['profit_pct']:.2f}%")
-        o2.metric("Expected Profit",f"₹{trade['expected_profit_inr']:,.0f}", delta_color="normal")
-        o3.metric("Stop Loss",      f"${trade['stop_loss']:,.2f}", f"-{trade['loss_pct']:.2f}%")
-        o4.metric("Max Loss",       f"₹{trade['max_loss_inr']:,.0f}", delta_color="inverse")
+        # Position
+        st.markdown("### 💼 Position")
+        p1, p2, p3, p4 = st.columns(4)
+        p1.metric("Capital",        f"₹{trade['capital_inr']:,.0f}")
+        p2.metric("Max Risk",       f"₹{trade['max_risk_inr']:,.0f}", f"{trade['risk_percent']}%")
+        p3.metric("Position Size",  f"{trade['position_size']:.6f} units")
+        p4.metric("Entry Cost",     f"₹{trade['entry_cost_inr']:,.0f}")
 
+        # R:R verdict
         rr = trade["risk_reward_ratio"]
-        if rr >= 2:
-            st.success(f"✅ **R:R = 1:{rr:.2f}** — Good setup")
+        verdict = trade.get("rr_verdict", "")
+        if rr >= 2.0:
+            st.success(f"**R:R = 1:{rr:.2f}** — {verdict}")
         elif rr >= 1.5:
-            st.info(f"⚠️ **R:R = 1:{rr:.2f}** — Acceptable")
+            st.info(f"**R:R = 1:{rr:.2f}** — {verdict}")
         else:
-            st.error(f"❌ **R:R = 1:{rr:.2f}** — Poor risk/reward, consider skipping")
+            st.error(f"**R:R = 1:{rr:.2f}** — {verdict}")
 
-        # ── Ready to Trade Card ──────────────────────────────────
+        # ── Copyable Trade Card ──────────────────────────────────
         st.divider()
-        st.markdown("### 🚀 Ready to Trade — Copy this into Groww / Zerodha")
-
-        platform_note = {
-            "BUY":  "Open Groww/Zerodha → Search asset → Place **CNC or MIS BUY order**",
-            "SELL": "Open Groww/Zerodha → Search asset → Place **CNC or MIS SELL order**",
+        st.markdown("### 🚀 Copy Into Groww / Zerodha")
+        broker_note = {
+            "BUY":  "Groww/Zerodha → Search asset → CNC or MIS BUY order",
+            "SELL": "Groww/Zerodha → Search asset → CNC or MIS SELL/SHORT order",
         }.get(decision, "")
 
-        rr_verdict = "✅ Good setup — go ahead" if rr >= 2 else ("⚠️ Acceptable — proceed carefully" if rr >= 1.5 else "❌ Poor R:R — consider skipping")
-
         st.code(f"""
-╔══════════════════════════════════════════════════╗
+╔═══════════════════════════════════════════════════════╗
    📋  TRADE SETUP  —  {asset_name} ({ticker})
-╠══════════════════════════════════════════════════╣
-  Action      :  {decision}
-  Asset       :  {asset_name} ({ticker})
+   Generated: {__import__('datetime').datetime.now().strftime('%Y-%m-%d %H:%M')}
+╠═══════════════════════════════════════════════════════╣
+  Action        :  {decision}
+  Confidence    :  {conf}%
+  Data Source   :  {data_source.upper()}
 
-  ── PRICE LEVELS (in $) ─────────────────────────
-  Current Price :  ${trade['current_price']:,.2f}
-  Entry Zone    :  ${trade['entry_zone_low']:,.2f}  →  ${trade['entry_zone_high']:,.2f}
-  Stop Loss     :  ${trade['stop_loss']:,.2f}   ← set this immediately on entry
-  Target        :  ${trade['target_price']:,.2f}   ← take profit here
+  ── PRICE LEVELS ─────────────────────────────────────
+  Current Price :  ${trade['current_price']:,.4f}
+  Entry Zone    :  ${trade['entry_zone_low']:,.4f}  →  ${trade['entry_zone_high']:,.4f}
+  Stop Loss     :  ${trade['stop_loss']:,.4f}   ← SET THIS FIRST on entry
+  Target        :  ${trade['target_price']:,.4f}   ← Take profit here
 
-  ── YOUR MONEY (in ₹) ───────────────────────────
+  ── YOUR MONEY (₹) ───────────────────────────────────
   Capital       :  ₹{trade['capital_inr']:,.0f}
   Max Risk      :  ₹{trade['max_risk_inr']:,.0f}  ({trade['risk_percent']}% of capital)
   Entry Cost    :  ₹{trade['entry_cost_inr']:,.0f}
-  Expected Profit: ₹{trade['expected_profit_inr']:,.0f}  (+{trade['profit_pct']:.2f}%)
+  Expected Gain :  ₹{trade['expected_profit_inr']:,.0f}  (+{trade['profit_pct']:.2f}%)
   Max Loss      :  ₹{trade['max_loss_inr']:,.0f}  (-{trade['loss_pct']:.2f}%)
 
-  ── POSITION ────────────────────────────────────
+  ── POSITION ─────────────────────────────────────────
   Quantity      :  {trade['position_size']:.6f} units
+  ATR (volatility): ${atr_used:.4f}
   Timing        :  {trade['timing']}
 
-  ── VERDICT ─────────────────────────────────────
-  Risk/Reward   :  1 : {rr:.2f}
-  Assessment    :  {rr_verdict}
-╚══════════════════════════════════════════════════╝
+  ── RISK/REWARD ──────────────────────────────────────
+  R:R Ratio     :  1 : {rr:.2f}
+  Verdict       :  {verdict}
+╚═══════════════════════════════════════════════════════╝
 """, language="text")
+        st.caption(f"💡 {broker_note}")
 
-        st.caption(f"💡 {platform_note}")
-
-    # ── WAIT Analysis ────────────────────────────────────────────
+    # ── WAIT Analysis ──────────────────────────────────────────────
     else:
         st.divider()
-        st.markdown("### 🟡 WAIT — Market Conditions")
+        st.markdown("### 🟡 WAIT — Why Not Trading Now")
         if wait_analysis:
             w1, w2 = st.columns([2, 1])
             with w1:
-                st.markdown("**📋 Why WAIT**")
-                st.info(wait_analysis["reason"])
+                st.error(f"**Reason:** {wait_analysis['reason']}")
                 st.markdown("**⚠️ Risk Factors**")
-                for r in wait_analysis["risk_factors"]:
-                    st.markdown(f"- {r}")
-                st.markdown("**🎯 Waiting For**")
-                for w in wait_analysis["waiting_for"]:
-                    st.markdown(f"- {w}")
-            with w2:
-                st.markdown("**⏰ Check Again**")
-                st.warning(wait_analysis["next_check"])
-                st.markdown("**💡 Recommendation**")
-                st.info(wait_analysis["recommendation"])
+                for rf in wait_analysis["risk_factors"]:
+                    st.markdown(f"- {rf}")
+                st.markdown("**🎯 Wait For**")
+                for wf in wait_analysis["waiting_for"]:
+                    st.markdown(f"- {wf}")
                 if wait_analysis.get("potential_loss"):
-                    st.error(f"**Risk of forcing trade:** {wait_analysis['potential_loss']}")
+                    st.error(f"**Forcing a trade now risks:** {wait_analysis['potential_loss']}")
+            with w2:
+                st.warning(f"⏰ **Check again in:** {wait_analysis['next_check']}")
+                st.info(f"💡 **Recommendation:**\n{wait_analysis['recommendation']}")
 
-    # ── Historical Outcomes ───────────────────────────────────────
+    # ── Historical Memory ──────────────────────────────────────────
     past_signals = result.get("past_signals", [])
     ticker_stats = result.get("ticker_stats")
 
     if ticker_stats or past_signals:
         st.divider()
-        st.subheader("📚 Historical Signal Memory")
+        st.subheader("📚 Your Track Record")
 
         if ticker_stats:
-            st.markdown("##### 📊 Your Track Record on this Asset")
-            ts1, ts2, ts3, ts4, ts5 = st.columns(5)
+            ts1, ts2, ts3, ts4, ts5, ts6 = st.columns(6)
             ts1.metric("Total Signals", ticker_stats["total"])
-            ts2.metric("Wins ✅",       ticker_stats["wins"])
-            ts3.metric("Losses ❌",     ticker_stats["losses"])
-            ts4.metric("Win Rate",      f"{ticker_stats['win_rate']}%",
+            ts2.metric("✅ Wins",        ticker_stats["wins"])
+            ts3.metric("❌ Losses",      ticker_stats["losses"])
+            ts4.metric("Win Rate",       f"{ticker_stats['win_rate']}%",
                        delta_color="normal" if ticker_stats["win_rate"] >= 50 else "inverse")
-            ts5.metric("Avg Win",       f"+{ticker_stats['avg_win']}%")
+            ts5.metric("Avg Win",        f"+{ticker_stats['avg_win']}%")
+            ts6.metric("Avg Loss",       f"{ticker_stats['avg_loss']}%")
 
         if past_signals:
-            st.markdown("##### 🔁 Similar Past Signals & Their Outcomes")
-            st.caption("These are signals with similar RSI, MACD and S/R zone that resolved previously.")
+            st.markdown("##### 🔁 Similar Past Setups")
             for ps in past_signals:
-                outcome_icon = "✅" if "TARGET" in ps["outcome"] else "❌"
-                pct_str = f"+{ps['outcome_pct']}%" if ps['outcome_pct'] > 0 else f"{ps['outcome_pct']}%"
-                ind = ps["indicators"]
-                with st.expander(
-                    f"{outcome_icon} {ps['decision']} signal on {ps['id']} → {ps['outcome']} ({pct_str})",
-                    expanded=False
-                ):
+                icon = "✅" if "TARGET" in ps["outcome"] else "❌"
+                pct  = f"+{ps['outcome_pct']}%" if ps['outcome_pct'] > 0 else f"{ps['outcome_pct']}%"
+                ind  = ps["indicators"]
+                with st.expander(f"{icon} {ps['decision']} on {ps['id']} → {ps['outcome']} ({pct})", expanded=False):
                     c1, c2, c3, c4 = st.columns(4)
-                    c1.metric("Entry Price",  f"${ps['entry_price']:,.2f}")
-                    c2.metric("Target",       f"${ps['target_price']:,.2f}")
-                    c3.metric("Stop Loss",    f"${ps['stop_loss']:,.2f}")
-                    c4.metric("Result",       pct_str,
-                              delta_color="normal" if ps['outcome_pct'] > 0 else "inverse")
+                    c1.metric("Entry",  f"${ps['entry_price']:,.4f}")
+                    c2.metric("Target", f"${ps['target_price']:,.4f}")
+                    c3.metric("Stop",   f"${ps['stop_loss']:,.4f}")
+                    c4.metric("Result", pct, delta_color="normal" if ps['outcome_pct'] > 0 else "inverse")
                     st.caption(
-                        f"Conditions then: RSI {ind.get('rsi')} · "
-                        f"MACD {'▲' if ind.get('macd_hist',0)>0 else '▼'} · "
-                        f"Zone: {ind.get('sr_zone')} · "
-                        f"Confidence: {ps['confidence']}%"
+                        f"Conditions: RSI {ind.get('rsi')} · "
+                        f"MACD {'▲' if ind.get('macd_hist', 0) > 0 else '▼'} · "
+                        f"Zone: {ind.get('sr_zone')} · Confidence: {ps['confidence']}%"
                     )
         else:
-            st.info("No similar past signals yet for this asset. They'll appear here after your first BUY/SELL signals resolve (hit target or stop).")
+            st.info("No similar resolved signals yet. They appear here once your BUY/SELL signals hit target or stop.")
 
-    # ── Agent Details ─────────────────────────────────────────────
+    # ── Agent Detail ───────────────────────────────────────────────
     st.divider()
-    st.subheader("🧠 Agent Analysis")
-    with st.expander("📉 Technical Agent (Chart & Indicators)", expanded=False):
-        st.write(tech)
-    with st.expander("⚡ Momentum Agent (Trend & Strength)", expanded=False):
-        st.write(mom)
-    with st.expander("📰 News Agent (Sentiment)", expanded=False):
-        if headlines:
-            st.markdown("**Latest Headlines:**")
-            for h in headlines:
-                st.markdown(f"- {h}")
+    st.subheader("🧠 Agent Reasoning")
+    with st.expander("📉 Technical Agent",             expanded=False): st.write(result["technical"])
+    with st.expander("⚡ Momentum Agent",              expanded=False): st.write(result["momentum"])
+    with st.expander("📰 News Agent",                  expanded=False):
+        if result.get("headlines"):
+            st.markdown("**Headlines used:**")
+            for h in result["headlines"]: st.markdown(f"- {h}")
             st.divider()
-        st.write(news_text)
-    with st.expander("🛡️ Risk Agent (Volatility & Safety)", expanded=False):
-        st.write(risk_agent_r)
-    with st.expander("🗂️ Decision Memory (last 10)", expanded=False):
-        st.json(mem)
+        st.write(result["news"])
+    with st.expander("🛡️ Risk Agent",                  expanded=False): st.write(result["risk"])
+    with st.expander("🗂️ Decision Memory (last 10)",   expanded=False): st.json(result["memory"])
