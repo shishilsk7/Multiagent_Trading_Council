@@ -31,6 +31,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 from stocks import UNIVERSE, CATEGORIES, ticker_label, currency_label
+from llm import check_llm_connectivity
 
 st.title("📈 AI Trading Council")
 st.markdown("*Technical · Momentum · News · Risk — Real-money grade analysis*")
@@ -38,6 +39,14 @@ st.markdown("*Technical · Momentum · News · Risk — Real-money grade analysi
 api_ok = bool(os.getenv("OPENROUTER_API_KEY"))
 status = "✅ API Connected" if api_ok else "⚠️ API Key Missing — set OPENROUTER_API_KEY"
 st.caption(f"🔑 {status}")
+
+if api_ok:
+    with st.spinner("Checking LLM…"):
+        llm_ok, llm_msg = check_llm_connectivity()
+    if llm_ok:
+        st.caption("🤖 LLM: ✅ Online")
+    else:
+        st.warning(f"🤖 LLM: ⚠️ {llm_msg} — analysis will degrade")
 st.divider()
 
 # ── Sidebar ──────────────────────────────────────────────────────────

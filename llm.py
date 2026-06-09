@@ -1,18 +1,39 @@
 import os
+import time
 from dotenv import load_dotenv
 
 load_dotenv()
 
-# Use openrouter/free as primary — auto-picks best available free model
-# Specific models as fallbacks in case the router has issues
+# openrouter/auto removed as primary — it's a meta-router that fails even when models are fine.
+# Models ordered by reliability on free tier. News/risk use lighter models (faster, cheaper quota).
 MODELS = {
-    "technical": ["openrouter/auto", "meta-llama/llama-3.3-70b-instruct:free", "qwen/qwen3-8b:free"],
-    "momentum":  ["openrouter/auto", "meta-llama/llama-3.3-70b-instruct:free", "qwen/qwen3-8b:free"],
-    "news":      ["openrouter/auto", "meta-llama/llama-3.3-70b-instruct:free", "qwen/qwen3-8b:free"],
-    "risk":      ["openrouter/auto", "meta-llama/llama-3.3-70b-instruct:free", "qwen/qwen3-8b:free"],
+    "technical": [
+        "meta-llama/llama-3.3-70b-instruct:free",
+        "deepseek/deepseek-r1-0528:free",
+        "qwen/qwen3-14b:free",
+        "qwen/qwen3-8b:free",
+        "mistralai/mistral-7b-instruct:free",
+    ],
+    "momentum": [
+        "meta-llama/llama-3.3-70b-instruct:free",
+        "deepseek/deepseek-r1-0528:free",
+        "qwen/qwen3-8b:free",
+        "mistralai/mistral-7b-instruct:free",
+    ],
+    "news": [
+        "qwen/qwen3-8b:free",
+        "meta-llama/llama-3.3-70b-instruct:free",
+        "mistralai/mistral-7b-instruct:free",
+    ],
+    "risk": [
+        "qwen/qwen3-8b:free",
+        "meta-llama/llama-3.3-70b-instruct:free",
+        "mistralai/mistral-7b-instruct:free",
+    ],
 }
 
 _client = None
+
 
 def _get_client():
     global _client
@@ -30,25 +51,65 @@ def _get_client():
 
 
 def ask_llm(role: str, prompt: str) -> str:
-    """Query LLM with automatic model fallback."""
+    """
+    Query LLM with automatic model fallback.
+    - Tries each model in order
+    - On rate-limit (429) waits 5s before trying next model
+    - Returns "WAIT (...)" only if ALL models fail
+    """
     client = _get_client()
     if not client:
         return "WAIT (API key not configured)"
 
-    for model in MODELS.get(role, ["openrouter/auto"]):
+    last_error = ""
+    for model in MODELS.get(role, MODELS["technical"]):
         try:
             res = client.chat.completions.create(
                 model=model,
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.1,
                 max_tokens=250,
-                timeout=20,
+                timeout=25,
             )
             text = res.choices[0].message.content
             if text and text.strip():
                 return text.strip()
         except Exception as e:
-            print(f"Model {model} failed: {e}")
+            last_error = str(e)
+            # Rate limit — brief pause before trying next model
+            if "429" in last_error or "rate" in last_error.lower():
+                time.sleep(5)
+            print(f"llm.py: {model} failed ({last_error[:80]})")
             continue
 
-    return "WAIT (all LLMs unavailable)"
+    return f"WAIT (all LLMs unavailable: {last_error[:120]})"
+
+
+def check_llm_connectivity() -> tuple[bool, str]:
+    """
+    Quick connectivity probe — tries a minimal request.
+    Returns (ok: bool, message: str).
+    Used by app.py to show status in sidebar.
+    """
+    client = _get_client()
+    if not client:
+        return False, "API key not configured"
+    try:
+        res = client.chat.completions.create(
+            model="qwen/qwen3-8b:free",
+            messages=[{"role": "user", "content": "Reply: OK"}],
+            temperature=0,
+            max_tokens=5,
+            timeout=10,
+        )
+        text = res.choices[0].message.content or ""
+        if text.strip():
+            return True, "Connected"
+        return False, "Empty response"
+    except Exception as e:
+        err = str(e)
+        if "429" in err:
+            return False, "Rate limited — wait 1 min"
+        if "401" in err:
+            return False, "Invalid API key"
+        return False, err[:80]
