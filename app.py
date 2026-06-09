@@ -83,7 +83,6 @@ with st.sidebar:
         ["1 Hour", "4 Hours", "1 Day", "3 Days", "1 Week", "1 Month"],
         index=2,
     )
-    interval = st.selectbox("Interval", ["1m", "5m", "15m", "1h", "1d"], index=1)
 
     st.divider()
     st.subheader("💰 Risk Management")
