@@ -41,10 +41,13 @@ status = "✅ API Connected" if api_ok else "⚠️ API Key Missing — set OPEN
 st.caption(f"🔑 {status}")
 
 if api_ok:
-    with st.spinner("Checking LLM…"):
-        llm_ok, llm_msg = check_llm_connectivity()
+    @st.cache_data(ttl=300, show_spinner=False)
+    def _cached_llm_check():
+        return check_llm_connectivity()
+
+    llm_ok, llm_msg = _cached_llm_check()
     if llm_ok:
-        st.caption("🤖 LLM: ✅ Online")
+        st.caption(f"🤖 LLM: ✅ {llm_msg}")
     else:
         st.warning(f"🤖 LLM: ⚠️ {llm_msg} — analysis will degrade")
 st.divider()
