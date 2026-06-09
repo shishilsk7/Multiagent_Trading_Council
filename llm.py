@@ -100,48 +100,12 @@ def ask_llm(role: str, prompt: str) -> str:
 
 
 def check_llm_connectivity() -> tuple[bool, str]:
-    """Probe Gemini first, then OpenRouter. Returns (ok, message)."""
-    gemini_key = os.getenv("GEMINI_API_KEY")
-    or_key     = os.getenv("OPENROUTER_API_KEY")
-
-    # Try Gemini
-    if gemini_key:
+    """Check API key presence only — no live probe (avoids burning rate limit)."""
+    if os.getenv("GEMINI_API_KEY"):
         client = _get_gemini()
-        if client is None:
-            gemini_err = "google-generativeai not installed or import failed"
-        else:
-            try:
-                r = client.generate_content(
-                    "Reply: OK",
-                    generation_config={"temperature": 0, "max_output_tokens": 5},
-                )
-                if r.text and r.text.strip():
-                    return True, "Gemini ✅"
-                gemini_err = "Empty response"
-            except Exception as e:
-                gemini_err = str(e)[:100]
-    else:
-        gemini_err = "GEMINI_API_KEY not set"
-
-    # Try OpenRouter
-    if or_key:
-        or_client = _get_openrouter()
-        for model in _OPENROUTER_MODELS[:2]:
-            try:
-                res = or_client.chat.completions.create(
-                    model=model,
-                    messages=[{"role": "user", "content": "Reply: OK"}],
-                    temperature=0, max_tokens=5, timeout=10,
-                )
-                if res.choices[0].message.content:
-                    return True, f"OpenRouter ✅ ({model.split('/')[1]})"
-            except Exception as e:
-                err = str(e)
-                if "401" in err: return False, f"Gemini: {gemini_err} | OpenRouter: Invalid key"
-                if "429" in err: return False, f"Gemini: {gemini_err} | OpenRouter: Rate limited"
-                continue
-        return False, f"Gemini: {gemini_err} | OpenRouter: all models failed"
-    else:
-        or_err = "OPENROUTER_API_KEY not set"
-
-    return False, f"Gemini: {gemini_err} | OpenRouter: {or_err}"
+        if client is not None:
+            return True, "Gemini ✅ (key set)"
+        return False, "GEMINI_API_KEY set but google-generativeai import failed"
+    if os.getenv("OPENROUTER_API_KEY"):
+        return True, "OpenRouter ✅ (key set)"
+    return False, "No API keys configured — set GEMINI_API_KEY or OPENROUTER_API_KEY"
