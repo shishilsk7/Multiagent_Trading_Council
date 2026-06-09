@@ -4,53 +4,70 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# Models verified available on OpenRouter free tier (June 2026)
-_FREE_MODELS = [
+# Gemini free tier: 15 req/min, 1500 req/day — primary
+# OpenRouter free models — fallback if Gemini fails
+_OPENROUTER_MODELS = [
     "meta-llama/llama-3.3-70b-instruct:free",
     "meta-llama/llama-3.1-8b-instruct:free",
     "mistralai/mistral-7b-instruct:free",
     "google/gemma-2-9b-it:free",
-    "nousresearch/hermes-3-llama-3.1-405b:free",
 ]
 
-MODELS = {
-    "technical": _FREE_MODELS,
-    "momentum":  _FREE_MODELS,
-    "news":      _FREE_MODELS,
-    "risk":      _FREE_MODELS,
-}
-
-_client = None
+_gemini_client = None
+_openrouter_client = None
 
 
-def _get_client():
-    global _client
-    if _client is not None:
-        return _client
+def _get_gemini():
+    global _gemini_client
+    if _gemini_client is not None:
+        return _gemini_client
+    api_key = os.getenv("GEMINI_API_KEY")
+    if not api_key:
+        return None
+    try:
+        import google.generativeai as genai
+        genai.configure(api_key=api_key)
+        _gemini_client = genai.GenerativeModel("gemini-2.0-flash")
+        return _gemini_client
+    except Exception:
+        return None
+
+
+def _get_openrouter():
+    global _openrouter_client
+    if _openrouter_client is not None:
+        return _openrouter_client
     api_key = os.getenv("OPENROUTER_API_KEY")
     if not api_key:
         return None
     try:
         from openai import OpenAI
-        _client = OpenAI(api_key=api_key, base_url="https://openrouter.ai/api/v1")
-        return _client
+        _openrouter_client = OpenAI(api_key=api_key, base_url="https://openrouter.ai/api/v1")
+        return _openrouter_client
     except Exception:
         return None
 
 
-def ask_llm(role: str, prompt: str) -> str:
-    """
-    Query LLM with automatic model fallback.
-    - Tries each model in order
-    - On rate-limit (429) waits 5s before trying next model
-    - Returns "WAIT (...)" only if ALL models fail
-    """
-    client = _get_client()
+def _ask_gemini(prompt: str) -> str:
+    client = _get_gemini()
     if not client:
-        return "WAIT (API key not configured)"
+        return ""
+    try:
+        response = client.generate_content(
+            prompt,
+            generation_config={"temperature": 0.1, "max_output_tokens": 250},
+        )
+        return response.text.strip() if response.text else ""
+    except Exception as e:
+        print(f"llm.py: Gemini failed: {e}")
+        return ""
 
-    last_error = ""
-    for model in MODELS.get(role, MODELS["technical"]):
+
+def _ask_openrouter(prompt: str) -> str:
+    client = _get_openrouter()
+    if not client:
+        return ""
+    for model in _OPENROUTER_MODELS:
         try:
             res = client.chat.completions.create(
                 model=model,
@@ -63,41 +80,58 @@ def ask_llm(role: str, prompt: str) -> str:
             if text and text.strip():
                 return text.strip()
         except Exception as e:
-            last_error = str(e)
-            # Rate limit — brief pause before trying next model
-            if "429" in last_error or "rate" in last_error.lower():
+            err = str(e)
+            if "429" in err:
                 time.sleep(5)
-            print(f"llm.py: {model} failed ({last_error[:80]})")
+            print(f"llm.py: {model} failed: {err[:80]}")
             continue
+    return ""
 
-    return f"WAIT (all LLMs unavailable: {last_error[:120]})"
+
+def ask_llm(role: str, prompt: str) -> str:
+    """Try Gemini first, fall back to OpenRouter."""
+    text = _ask_gemini(prompt)
+    if text:
+        return text
+    text = _ask_openrouter(prompt)
+    if text:
+        return text
+    return "WAIT (all LLMs unavailable)"
 
 
 def check_llm_connectivity() -> tuple[bool, str]:
-    """
-    Quick connectivity probe — tries each free model until one responds.
-    Returns (ok: bool, message: str).
-    """
-    client = _get_client()
-    if not client:
-        return False, "API key not configured"
-    for model in _FREE_MODELS:
+    """Probe Gemini first, then OpenRouter. Returns (ok, message)."""
+    # Try Gemini
+    client = _get_gemini()
+    if client:
         try:
-            res = client.chat.completions.create(
-                model=model,
-                messages=[{"role": "user", "content": "Reply: OK"}],
-                temperature=0,
-                max_tokens=5,
-                timeout=10,
+            r = client.generate_content(
+                "Reply: OK",
+                generation_config={"temperature": 0, "max_output_tokens": 5},
             )
-            text = (res.choices[0].message.content or "").strip()
-            if text:
-                return True, f"Connected ({model.split('/')[1]})"
+            if r.text and r.text.strip():
+                return True, "Gemini ✅"
         except Exception as e:
-            err = str(e)
-            if "401" in err:
-                return False, "Invalid API key"
-            if "429" in err:
-                return False, "Rate limited — wait 1 min"
-            continue
-    return False, "All models unavailable — check openrouter.ai/models for free models"
+            print(f"llm.py: Gemini probe failed: {e}")
+
+    # Try OpenRouter
+    or_client = _get_openrouter()
+    if or_client:
+        for model in _OPENROUTER_MODELS[:2]:
+            try:
+                res = or_client.chat.completions.create(
+                    model=model,
+                    messages=[{"role": "user", "content": "Reply: OK"}],
+                    temperature=0, max_tokens=5, timeout=10,
+                )
+                if res.choices[0].message.content:
+                    return True, f"OpenRouter ✅ ({model.split('/')[1]})"
+            except Exception as e:
+                err = str(e)
+                if "401" in err: return False, "Invalid OpenRouter API key"
+                if "429" in err: return False, "OpenRouter rate limited"
+                continue
+
+    if not os.getenv("GEMINI_API_KEY") and not os.getenv("OPENROUTER_API_KEY"):
+        return False, "No API keys configured"
+    return False, "All LLMs unavailable"
