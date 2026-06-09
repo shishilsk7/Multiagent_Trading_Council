@@ -101,22 +101,31 @@ def ask_llm(role: str, prompt: str) -> str:
 
 def check_llm_connectivity() -> tuple[bool, str]:
     """Probe Gemini first, then OpenRouter. Returns (ok, message)."""
+    gemini_key = os.getenv("GEMINI_API_KEY")
+    or_key     = os.getenv("OPENROUTER_API_KEY")
+
     # Try Gemini
-    client = _get_gemini()
-    if client:
-        try:
-            r = client.generate_content(
-                "Reply: OK",
-                generation_config={"temperature": 0, "max_output_tokens": 5},
-            )
-            if r.text and r.text.strip():
-                return True, "Gemini ✅"
-        except Exception as e:
-            print(f"llm.py: Gemini probe failed: {e}")
+    if gemini_key:
+        client = _get_gemini()
+        if client is None:
+            gemini_err = "google-generativeai not installed or import failed"
+        else:
+            try:
+                r = client.generate_content(
+                    "Reply: OK",
+                    generation_config={"temperature": 0, "max_output_tokens": 5},
+                )
+                if r.text and r.text.strip():
+                    return True, "Gemini ✅"
+                gemini_err = "Empty response"
+            except Exception as e:
+                gemini_err = str(e)[:100]
+    else:
+        gemini_err = "GEMINI_API_KEY not set"
 
     # Try OpenRouter
-    or_client = _get_openrouter()
-    if or_client:
+    if or_key:
+        or_client = _get_openrouter()
         for model in _OPENROUTER_MODELS[:2]:
             try:
                 res = or_client.chat.completions.create(
@@ -128,10 +137,11 @@ def check_llm_connectivity() -> tuple[bool, str]:
                     return True, f"OpenRouter ✅ ({model.split('/')[1]})"
             except Exception as e:
                 err = str(e)
-                if "401" in err: return False, "Invalid OpenRouter API key"
-                if "429" in err: return False, "OpenRouter rate limited"
+                if "401" in err: return False, f"Gemini: {gemini_err} | OpenRouter: Invalid key"
+                if "429" in err: return False, f"Gemini: {gemini_err} | OpenRouter: Rate limited"
                 continue
+        return False, f"Gemini: {gemini_err} | OpenRouter: all models failed"
+    else:
+        or_err = "OPENROUTER_API_KEY not set"
 
-    if not os.getenv("GEMINI_API_KEY") and not os.getenv("OPENROUTER_API_KEY"):
-        return False, "No API keys configured"
-    return False, "All LLMs unavailable"
+    return False, f"Gemini: {gemini_err} | OpenRouter: {or_err}"
