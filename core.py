@@ -178,7 +178,16 @@ def run_enhanced_analysis(
     # ── 2. Indicators ───────────────────────────────────────────────
     df = add_indicators(df)
     if df.empty:
-        raise Exception("Failed to calculate indicators — not enough candle data")
+        # Retry with daily candles — works for indices and illiquid stocks
+        df_daily = fetch_ticker_timeframe(ticker, period="60d", interval="1d")
+        if df_daily.attrs.get("source") != "mock":
+            df_daily = add_indicators(df_daily)
+        if df_daily.empty:
+            raise Exception(
+                f"Not enough candle data for {ticker}. "
+                f"Try a longer timeframe or check if the market is open."
+            )
+        df = df_daily
 
     latest        = df.iloc[-1]
     current_price = float(latest["Close"])
