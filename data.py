@@ -19,12 +19,12 @@ except ImportError:
 # Period fallback chain: if narrow period returns too few candles, try wider ones
 _PERIOD_FALLBACKS = {
     "1d":  ["2d", "5d", "7d"],
-    "3d":  ["5d", "7d"],
+    "3d":  ["5d", "7d", "10d"],
     "7d":  ["7d", "10d", "14d"],
     "30d": ["30d", "60d"],
 }
 
-_MIN_CANDLES = 55  # needed for EMA50 + ADX14
+_MIN_CANDLES = 50  # EMA50 needs 50, ADX14 needs 14 — 50 covers both
 
 
 def fetch_ticker_timeframe(ticker: str, period: str = "1d", interval: str = "5m") -> pd.DataFrame:
