@@ -36,8 +36,8 @@ from llm import check_llm_connectivity
 st.title("📈 AI Trading Council")
 st.markdown("*Technical · Momentum · News · Risk — Real-money grade analysis*")
 
-api_ok = bool(os.getenv("OPENROUTER_API_KEY"))
-status = "✅ API Connected" if api_ok else "⚠️ API Key Missing — set OPENROUTER_API_KEY"
+api_ok = bool(os.getenv("GEMINI_API_KEY") or os.getenv("OPENROUTER_API_KEY"))
+status = "✅ API Connected" if api_ok else "⚠️ API Key Missing — set GEMINI_API_KEY or OPENROUTER_API_KEY"
 st.caption(f"🔑 {status}")
 
 if api_ok:
