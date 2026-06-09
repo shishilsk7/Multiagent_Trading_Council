@@ -13,8 +13,8 @@ import numpy as np
 
 
 def add_indicators(df):
-    if len(df) < 50:
-        return pd.DataFrame()  # need 50 candles for EMA50 + ADX14
+    if len(df) < 14:
+        return pd.DataFrame()  # absolute floor — RSI/ADX invalid below 14 periods
 
     close  = df["Close"]
     high   = df["High"]

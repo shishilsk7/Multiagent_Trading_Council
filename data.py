@@ -17,7 +17,7 @@ except ImportError:
 
 
 # Minimum candles needed for all indicators (EMA50 + ADX14)
-_MIN_CANDLES = 55
+_MIN_CANDLES = 20  # hard floor — RSI/ADX need at least 14 periods to be valid
 
 # How many candles per day each interval produces (conservative estimate for NSE)
 _CANDLES_PER_DAY = {

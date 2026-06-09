@@ -268,6 +268,10 @@ if st.session_state["last_result"] is not None:
     data_source   = result["data_source"]
 
     st.success(f"✅ Live data: **{data_source.upper()}** · {result['data_points']} candles · {timeframe} @ {final_interval}")
+    if result['data_points'] < 30:
+        st.warning(f"⚠️ Only {result['data_points']} candles available — indicators may be less reliable. For best accuracy, use a longer timeframe or try again during market hours.")
+    elif result['data_points'] < 55:
+        st.info(f"ℹ️ {result['data_points']} candles — sufficient for analysis but more data would improve accuracy.")
 
     # ── Main Decision ──────────────────────────────────────────────
     st.markdown("---")
