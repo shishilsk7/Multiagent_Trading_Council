@@ -337,7 +337,11 @@ if st.session_state["last_result"] is not None:
     breakdown     = result.get("vote_breakdown", {})
     data_source   = result["data_source"]
 
-    st.success(f"✅ Live data: **{data_source.upper()}** · {result['data_points']} candles · {lookback_label} @ {final_interval}")
+    actual_interval = result.get("interval", final_interval)
+    st.success(f"✅ Live data: **{data_source.upper()}** · {result['data_points']} candles · {lookback_label} @ {actual_interval}")
+    if actual_interval != final_interval:
+        st.warning(f"⚠️ **Fallback Active**: The system fell back from **{final_interval}** to **{actual_interval}** data because the requested intraday interval returned no valid rows (often due to zero index volume on yfinance).")
+    
     if result['data_points'] < 30:
         st.warning(f"⚠️ Only {result['data_points']} candles available — indicators may be less reliable. For best accuracy, use a longer timeframe or try again during market hours.")
     elif result['data_points'] < 55:

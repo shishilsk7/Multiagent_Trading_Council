@@ -233,6 +233,7 @@ def run_enhanced_analysis(
 
     # ── 2. Indicators ───────────────────────────────────────────────
     df = add_indicators(df)
+    final_interval = interval
     if df.empty:
         # Retry with daily candles — works for indices and illiquid stocks
         df_daily = fetch_ticker_timeframe(ticker, period="60d", interval="1d")
@@ -244,6 +245,7 @@ def run_enhanced_analysis(
                 f"Try a longer timeframe or check if the market is open."
             )
         df = df_daily
+        final_interval = "1d"
 
     latest        = df.iloc[-1]
     current_price = float(latest["Close"])
@@ -338,6 +340,7 @@ def run_enhanced_analysis(
         "current_price":  current_price,
         "data_source":    data_source,
         "data_points":    len(df),
+        "interval":       final_interval,
         "atr":            float(latest.get("atr", 0)),
         "adx":            float(latest.get("adx", 0)),
         "rsi":            float(latest.get("rsi", 50)),

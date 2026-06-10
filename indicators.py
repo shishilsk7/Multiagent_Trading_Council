@@ -59,13 +59,13 @@ def add_indicators(df):
 
     # ── Volume ──────────────────────────────────────────────────────
     df["vol_ma"]    = volume.rolling(20).mean()
-    df["vol_ratio"] = volume / df["vol_ma"].replace(0, np.nan)
+    df["vol_ratio"] = (volume / df["vol_ma"].replace(0, np.nan)).fillna(1.0)
     df["obv"]       = ta.volume.OnBalanceVolumeIndicator(close, volume).on_balance_volume()
 
     # ── Candlestick Patterns (real computation) ──────────────────────
     body      = (close - open_).abs()
     total_rng = (high - low).replace(0, np.nan)
-    body_pct  = body / total_rng  # body as % of range
+    body_pct  = (body / total_rng).fillna(0.0)  # body as % of range
 
     # Hammer: small body in upper 30% of range, lower wick > 2x body, appearing after downtrend
     lower_wick    = (open_.combine(close, min) - low)
