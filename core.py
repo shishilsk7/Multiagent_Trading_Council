@@ -278,6 +278,7 @@ def run_enhanced_analysis(
         "ticker_stats":   ticker_stats,
         "patterns":       patterns,
         "vol_state":      vol,
+        "df":             df,
     }
 
 

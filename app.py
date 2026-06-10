@@ -95,12 +95,52 @@ with st.sidebar:
 
     st.divider()
     st.subheader("📊 Timeframe")
-    timeframe = st.selectbox(
-        "Period",
-        ["1 Hour — Scalping", "4 Hours — Intraday", "1 Day — Intraday", "3 Days — Short Swing", "1 Week — Swing Trade", "1 Month — Positional"],
-        index=2,
+    interval_label = st.selectbox(
+        "Candle Interval",
+        ["1 Minute (Scalping)", "5 Minutes (Intraday)", "15 Minutes (Short Swing)", "1 Hour (Swing)", "1 Day (Positional)"],
+        index=1,
     )
-    timeframe = timeframe.split(" — ")[0]  # strip label before use
+    
+    interval_map = {
+        "1 Minute (Scalping)": "1m",
+        "5 Minutes (Intraday)": "5m",
+        "15 Minutes (Short Swing)": "15m",
+        "1 Hour (Swing)": "1h",
+        "1 Day (Positional)": "1d"
+    }
+    final_interval = interval_map[interval_label]
+
+    # Smart lookback constraints to prevent yfinance API errors
+    if final_interval == "1m":
+        lookback_opts = ["1 Day", "5 Days"]
+        lb_index = 0
+    elif final_interval in ("5m", "15m"):
+        lookback_opts = ["1 Day", "5 Days", "1 Month"]
+        lb_index = 1
+    elif final_interval == "1h":
+        lookback_opts = ["5 Days", "1 Month", "3 Months"]
+        lb_index = 1
+    else:  # 1d
+        lookback_opts = ["1 Month", "3 Months", "6 Months", "1 Year", "2 Years", "Max"]
+        lb_index = 3
+
+    lookback_label = st.selectbox(
+        "Lookback Range",
+        lookback_opts,
+        index=min(lb_index, len(lookback_opts)-1)
+    )
+
+    period_map = {
+        "1 Day": "1d",
+        "5 Days": "5d",
+        "1 Month": "1mo",
+        "3 Months": "3mo",
+        "6 Months": "6mo",
+        "1 Year": "1y",
+        "2 Years": "2y",
+        "Max": "max"
+    }
+    period = period_map[lookback_label]
 
     st.divider()
     st.subheader("💰 Risk Management")
@@ -159,16 +199,6 @@ except Exception:
 
 # ── Action Buttons ────────────────────────────────────────────────────
 st.divider()
-TIMEFRAME_MAP = {
-    "1 Hour":  ("1d", "1m"),
-    "4 Hours": ("1d", "5m"),
-    "1 Day":   ("1d", "5m"),
-    "3 Days":  ("3d", "15m"),
-    "1 Week":  ("7d", "1h"),
-    "1 Month": ("30d", "1d"),
-}
-period, interval_default = TIMEFRAME_MAP.get(timeframe, ("1d", "5m"))
-final_interval = interval_default  # always use TIMEFRAME_MAP — manual override causes mismatches
 
 col1, col2 = st.columns([3, 1])
 run_single = col1.button(f"🔍 Analyse {asset_name}", type="primary", use_container_width=True)
@@ -296,7 +326,7 @@ if st.session_state["last_result"] is not None:
     breakdown     = result.get("vote_breakdown", {})
     data_source   = result["data_source"]
 
-    st.success(f"✅ Live data: **{data_source.upper()}** · {result['data_points']} candles · {timeframe} @ {final_interval}")
+    st.success(f"✅ Live data: **{data_source.upper()}** · {result['data_points']} candles · {lookback_label} @ {final_interval}")
     if result['data_points'] < 30:
         st.warning(f"⚠️ Only {result['data_points']} candles available — indicators may be less reliable. For best accuracy, use a longer timeframe or try again during market hours.")
     elif result['data_points'] < 55:
@@ -343,6 +373,111 @@ if st.session_state["last_result"] is not None:
               delta_color="normal" if macd_v > 0 else "inverse")
     k5.metric("Patterns", len(result.get("patterns", [])))
     k6.metric("Candles",  result["data_points"])
+
+    # ── Interactive Chart ──────────────────────────────────────────
+    st.divider()
+    st.markdown("### 📊 Live Price Chart")
+    try:
+        import plotly.graph_objects as go
+        from plotly.subplots import make_subplots
+
+        chart_df = result.get("df")
+        if chart_df is not None and not chart_df.empty:
+            # Show last 120 candles for standard, or less if not available
+            max_candles = 120
+            plot_df = chart_df.iloc[-min(len(chart_df), max_candles):]
+
+            # Subplots: Row 1 = Candlestick + EMAs (82%), Row 2 = Volume (18%)
+            fig = make_subplots(
+                rows=2, cols=1, 
+                shared_xaxes=True, 
+                vertical_spacing=0.03, 
+                row_width=[0.18, 0.82]
+            )
+
+            # Candlestick chart
+            fig.add_trace(
+                go.Candlestick(
+                    x=plot_df.index,
+                    open=plot_df["Open"],
+                    high=plot_df["High"],
+                    low=plot_df["Low"],
+                    close=plot_df["Close"],
+                    name="OHLC",
+                    increasing_line_color="#22c55e",
+                    decreasing_line_color="#ef4444"
+                ),
+                row=1, col=1
+            )
+
+            # EMA Indicators
+            if "ema9" in plot_df.columns:
+                fig.add_trace(go.Scatter(x=plot_df.index, y=plot_df["ema9"], name="EMA 9", line=dict(color="#3b82f6", width=1.0)), row=1, col=1)
+            if "ema20" in plot_df.columns:
+                fig.add_trace(go.Scatter(x=plot_df.index, y=plot_df["ema20"], name="EMA 20", line=dict(color="#eab308", width=1.0)), row=1, col=1)
+            if "ema50" in plot_df.columns:
+                fig.add_trace(go.Scatter(x=plot_df.index, y=plot_df["ema50"], name="EMA 50", line=dict(color="#a855f7", width=1.5)), row=1, col=1)
+
+            # Support & Resistance Lines
+            latest_row = plot_df.iloc[-1]
+            support_val = float(latest_row.get("support", 0))
+            resistance_val = float(latest_row.get("resistance", 0))
+            
+            # Use currency label of ticker
+            cur_sym = currency_label(ticker)
+            
+            if support_val > 0:
+                fig.add_hline(y=support_val, line_dash="dash", line_color="#10b981", line_width=1, annotation_text=f"Support ({cur_sym}{support_val:,.2f})", annotation_position="bottom left", row=1, col=1)
+            if resistance_val > 0:
+                fig.add_hline(y=resistance_val, line_dash="dash", line_color="#f43f5e", line_width=1, annotation_text=f"Resistance ({cur_sym}{resistance_val:,.2f})", annotation_position="top left", row=1, col=1)
+
+            # Visual overlay of stop loss & target if BUY/SELL triggered
+            if trade:
+                entry_low = trade.get("entry_zone_low", 0)
+                entry_high = trade.get("entry_zone_high", 0)
+                stop_loss = trade.get("stop_loss", 0)
+                target_price = trade.get("target_price", 0)
+                
+                # Target Line
+                fig.add_hline(y=target_price, line_dash="dot", line_color="#10b981", line_width=2, annotation_text=f"TARGET ({cur_sym}{target_price:,.2f})", annotation_position="top right", row=1, col=1)
+                # Stop Loss Line
+                fig.add_hline(y=stop_loss, line_dash="dot", line_color="#f43f5e", line_width=2, annotation_text=f"STOP LOSS ({cur_sym}{stop_loss:,.2f})", annotation_position="bottom right", row=1, col=1)
+                # Entry Zone shading
+                fig.add_hrect(y0=entry_low, y1=entry_high, fillcolor="#3b82f6", opacity=0.1, line_width=0, annotation_text="ENTRY ZONE", annotation_position="left", row=1, col=1)
+
+            # Volume bars chart
+            v_colors = ["#22c55e" if close >= open else "#ef4444" for open, close in zip(plot_df["Open"], plot_df["Close"])]
+            fig.add_trace(
+                go.Bar(
+                    x=plot_df.index,
+                    y=plot_df["Volume"],
+                    name="Volume",
+                    marker_color=v_colors,
+                    opacity=0.5,
+                    showlegend=False
+                ),
+                row=2, col=1
+            )
+
+            # Dark theme layout matching Streamlit custom styling
+            fig.update_layout(
+                template="plotly_dark",
+                xaxis_rangeslider_visible=False,
+                height=480,
+                margin=dict(l=10, r=10, t=10, b=10),
+                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+                paper_bgcolor="#0e1117",
+                plot_bgcolor="#1e1e2e"
+            )
+            
+            fig.update_yaxes(title_text=f"Price ({cur_sym})", row=1, col=1)
+            fig.update_yaxes(title_text="Volume", row=2, col=1)
+
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.info("No chart data available.")
+    except Exception as e:
+        st.warning(f"⚠️ Unable to render interactive chart: {e}")
 
     # ── Vote Breakdown ─────────────────────────────────────────────
     st.divider()
