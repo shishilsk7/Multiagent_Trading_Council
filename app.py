@@ -110,24 +110,13 @@ with st.sidebar:
     }
     final_interval = interval_map[interval_label]
 
-    # Smart lookback constraints to prevent yfinance API errors
-    if final_interval == "1m":
-        lookback_opts = ["1 Day", "5 Days"]
-        lb_index = 0
-    elif final_interval in ("5m", "15m"):
-        lookback_opts = ["1 Day", "5 Days", "1 Month"]
-        lb_index = 1
-    elif final_interval == "1h":
-        lookback_opts = ["5 Days", "1 Month", "3 Months"]
-        lb_index = 1
-    else:  # 1d
-        lookback_opts = ["1 Month", "3 Months", "6 Months", "1 Year", "2 Years", "Max"]
-        lb_index = 3
-
+    # Show all lookback ranges at all times to keep UI consistent and powerful
+    lookback_opts = ["1 Day", "5 Days", "1 Month", "3 Months", "6 Months", "1 Year", "2 Years", "Max"]
+    # Match default selection "1 Month" if available (index 2)
     lookback_label = st.selectbox(
         "Lookback Range",
         lookback_opts,
-        index=min(lb_index, len(lookback_opts)-1)
+        index=2
     )
 
     period_map = {
@@ -140,7 +129,29 @@ with st.sidebar:
         "2 Years": "2y",
         "Max": "max"
     }
-    period = period_map[lookback_label]
+    raw_period = period_map[lookback_label]
+
+    # Resolve yfinance API limits behind the scenes and display helper notes
+    adjusted = False
+    limit_reason = ""
+    period = raw_period
+
+    if final_interval == "1m" and raw_period not in ("1d", "5d"):
+        period = "5d"
+        adjusted = True
+        limit_reason = "⚠️ yfinance limits 1-minute data to the last 7 days. Using **5 Days** lookback instead."
+    elif final_interval in ("5m", "15m") and raw_period not in ("1d", "5d", "1mo"):
+        period = "1mo"
+        adjusted = True
+        limit_reason = "⚠️ yfinance limits 5m/15m data to the last 60 days. Using **1 Month** lookback instead."
+    elif final_interval == "1h" and raw_period in ("1y", "2y", "max"):
+        if raw_period == "max":
+            period = "2y"
+            adjusted = True
+            limit_reason = "⚠️ yfinance limits 1-hour data to the last 730 days. Using **2 Years** lookback instead."
+
+    if adjusted:
+        st.warning(limit_reason)
 
     st.divider()
     st.subheader("💰 Risk Management")
