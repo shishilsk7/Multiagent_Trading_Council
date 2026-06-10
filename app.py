@@ -69,6 +69,79 @@ with col_conn2:
                 st.error(msg)
 st.divider()
 
+# ── Watchlist Panel ───────────────────────────────────────────────────
+st.subheader("🎓 Expert Watchlist & Actionable Setups")
+with st.expander("🔍 View Today's Key Market Setups (Dynamic Scan)", expanded=False):
+    st.markdown("This panel performs a real-time scan of high-interest assets to identify key levels, support floors, and timing entry windows.")
+    
+    if st.button("⚡ Scan Watchlist Now", use_container_width=True):
+        import concurrent.futures
+        from core import run_enhanced_analysis
+        
+        watchlist_tickers = ["WIPRO.NS", "RELIANCE.NS", "PLTR", "BTC-USD", "NVDA"]
+        
+        def scan_watchlist_ticker(t):
+            try:
+                # Use 1h timeframe for swing setups
+                r = run_enhanced_analysis(ticker=t, period="1mo", interval="1h")
+                return t, r
+            except Exception as e:
+                return t, e
+        
+        with st.spinner("Analyzing setups and support/resistance zones..."):
+            with concurrent.futures.ThreadPoolExecutor(max_workers=len(watchlist_tickers)) as executor:
+                results = list(executor.map(scan_watchlist_ticker, watchlist_tickers))
+        
+        for t, r in results:
+            if isinstance(r, Exception):
+                st.error(f"⚠️ Failed to scan {t}: {r}")
+                continue
+                
+            decision = r["decision"]
+            price = r["current_price"]
+            df_ticker = r["df"]
+            support = float(df_ticker.iloc[-1].get("support", 0.0))
+            resistance = float(df_ticker.iloc[-1].get("resistance", 0.0))
+            rsi = r["rsi"]
+            sr_zone = r["sr_zone"]
+            cur = currency_label(t)
+            
+            # Formulate the expert recommendation dynamically
+            if decision == "BUY":
+                rec = f"🟢 **BUY TRIGGERED**: The council has confirmed a bullish setup. Position size targets an ATR-based entry. Watch the entry zone: **{cur}{r['trade']['entry_zone_low']:,.2f} – {cur}{r['trade']['entry_zone_high']:,.2f}**."
+            elif decision == "SELL":
+                rec = f"🔴 **SELL TRIGGERED**: The council has confirmed a bearish setup. Position size targets an ATR-based short. Entry zone: **{cur}{r['trade']['entry_zone_low']:,.2f} – {cur}{r['trade']['entry_zone_high']:,.2f}**."
+            else:
+                # Wait scenarios
+                if rsi < 30:
+                    rec = f"⚠️ **OVERSOLD BOUNCE CANDIDATE**: Price is heavily oversold (RSI: {rsi:.1f}). Do not catch a falling knife. Wait for a green hourly candle to close above support at **{cur}{support:,.2f}** before buying."
+                elif rsi > 70:
+                    rec = f"⚠️ **OVERBOUGHT REVERSAL CANDIDATE**: Price is overbought (RSI: {rsi:.1f}). Wait for a red hourly candle confirmation near resistance at **{cur}{resistance:,.2f}** to look for short entries."
+                elif sr_zone == "Near Support":
+                    rec = f"🎯 **SITTING ON SUPPORT**: Trading right above the support floor of **{cur}{support:,.2f}**. This is a prime low-risk bounce setup. Wait for a green confirmation candle to trigger a buy."
+                elif sr_zone == "Near Resistance":
+                    rec = f"🎯 **TESTING RESISTANCE**: Currently testing the resistance ceiling of **{cur}{resistance:,.2f}**. Wait for either a clean breakout close above this line, or a reversal red candle to short."
+                else:
+                    rec = f"⚖️ **CONSOLIDATING**: Asset is trading in the middle of its channel (Support: {cur}{support:,.2f} | Resistance: {cur}{resistance:,.2f}). The risk-reward is currently neutral. Wait for the price to move closer to the boundaries."
+            
+            # Render asset card
+            col_a, col_b = st.columns([1, 3])
+            with col_a:
+                st.markdown(f"### **{t}**")
+                st.markdown(f"**Price**: {cur}{price:,.2f}")
+                if decision == "BUY":
+                    st.success(f"🟢 BUY ({r['confidence']}%)")
+                elif decision == "SELL":
+                    st.error(f"🔴 SELL ({r['confidence']}%)")
+                else:
+                    st.warning(f"🟡 WAIT ({r['confidence']}%)")
+            with col_b:
+                st.markdown(f"**Expert Insight**:")
+                st.info(rec)
+            st.divider()
+
+st.divider()
+
 # ── Sidebar ──────────────────────────────────────────────────────────
 with st.sidebar:
     st.header("⚙️ Settings")
