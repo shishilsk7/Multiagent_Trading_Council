@@ -388,6 +388,25 @@ if st.session_state["last_result"] is not None:
     # ── Interactive Chart ──────────────────────────────────────────
     st.divider()
     st.markdown("### 📊 Live Price Chart")
+    with st.expander("💡 How to read this chart (Help Guide)", expanded=False):
+        st.markdown("""
+        * **Candlestick Bars (Green / Red)**:
+          * **Green** = Bullish candle (the price closed higher than it opened).
+          * **Red** = Bearish candle (the price closed lower than it opened).
+          * The thin line 'wicks' at the top/bottom show the highest and lowest prices reached during that candle interval.
+        * **Moving Averages (Lines overlaying the price)**:
+          * **EMA 9 (Blue)**: Short-term momentum trend.
+          * **EMA 20 (Yellow)**: Medium-term trend.
+          * **EMA 50 (Purple)**: Major trend direction.
+          * *When fast lines (Blue) cross above slow lines (Purple), it signals a bullish momentum shift.*
+        * **Horizontal Dashed Lines**:
+          * **Support (Dashed Green)**: Price floor where buyers historically step in to support the price.
+          * **Resistance (Dashed Red)**: Price ceiling where sellers historically step in to reject the price.
+        * **Trade Overlays (Dashed Target & Stop lines)**:
+          * **TARGET (Green)**: The take-profit target price where you should lock in gains.
+          * **STOP LOSS (Red)**: The risk cutoff price. If the price falls below this, exit the trade to protect capital.
+          * **ENTRY ZONE (Shaded Area)**: The optimal price range recommended for entering the trade.
+        """)
     try:
         import plotly.graph_objects as go
         from plotly.subplots import make_subplots
@@ -442,19 +461,27 @@ if st.session_state["last_result"] is not None:
             if resistance_val > 0:
                 fig.add_hline(y=resistance_val, line_dash="dash", line_color="#f43f5e", line_width=1, annotation_text=f"Resistance ({cur_sym}{resistance_val:,.2f})", annotation_position="top left", row=1, col=1)
 
-            # Visual overlay of stop loss & target if BUY/SELL triggered
+            # Visual overlay of stop loss & target if BUY/SELL or WAIT triggered
             if trade:
+                is_hypo = trade.get("is_hypothetical", False)
                 entry_low = trade.get("entry_zone_low", 0)
                 entry_high = trade.get("entry_zone_high", 0)
                 stop_loss = trade.get("stop_loss", 0)
                 target_price = trade.get("target_price", 0)
                 
+                target_lbl = "Hypothetical TARGET" if is_hypo else "TARGET"
+                stop_lbl = "Hypothetical STOP" if is_hypo else "STOP LOSS"
+                entry_lbl = "HYPOTHETICAL ENTRY" if is_hypo else "ENTRY ZONE"
+                line_col_target = "#cbd5e1" if is_hypo else "#10b981"
+                line_col_stop = "#cbd5e1" if is_hypo else "#f43f5e"
+                rect_color = "#cbd5e1" if is_hypo else "#3b82f6"
+                
                 # Target Line
-                fig.add_hline(y=target_price, line_dash="dot", line_color="#10b981", line_width=2, annotation_text=f"TARGET ({cur_sym}{target_price:,.2f})", annotation_position="top right", row=1, col=1)
+                fig.add_hline(y=target_price, line_dash="dot", line_color=line_col_target, line_width=2, annotation_text=f"{target_lbl} ({cur_sym}{target_price:,.2f})", annotation_position="top right", row=1, col=1)
                 # Stop Loss Line
-                fig.add_hline(y=stop_loss, line_dash="dot", line_color="#f43f5e", line_width=2, annotation_text=f"STOP LOSS ({cur_sym}{stop_loss:,.2f})", annotation_position="bottom right", row=1, col=1)
+                fig.add_hline(y=stop_loss, line_dash="dot", line_color=line_col_stop, line_width=2, annotation_text=f"{stop_lbl} ({cur_sym}{stop_loss:,.2f})", annotation_position="bottom right", row=1, col=1)
                 # Entry Zone shading
-                fig.add_hrect(y0=entry_low, y1=entry_high, fillcolor="#3b82f6", opacity=0.1, line_width=0, annotation_text="ENTRY ZONE", annotation_position="left", row=1, col=1)
+                fig.add_hrect(y0=entry_low, y1=entry_high, fillcolor=rect_color, opacity=0.08, line_width=0, annotation_text=entry_lbl, annotation_position="left", row=1, col=1)
 
             # Volume bars chart
             v_colors = ["#22c55e" if close >= open else "#ef4444" for open, close in zip(plot_df["Open"], plot_df["Close"])]
@@ -489,6 +516,33 @@ if st.session_state["last_result"] is not None:
             st.info("No chart data available.")
     except Exception as e:
         st.warning(f"⚠️ Unable to render interactive chart: {e}")
+
+    # ── Market Playbook ────────────────────────────────────────────
+    st.divider()
+    market_env = result.get("market_env")
+    if market_env:
+        st.markdown("### 🎓 Market Playbook & Suitability")
+        st.markdown(f"**Current Regime:** {market_env['verdict']}")
+        st.markdown(f"👉 **Trading Suitability:** {market_env['suitability']}")
+        
+        m_col1, m_col2 = st.columns(2)
+        with m_col1:
+            st.markdown("**🟢 Opportunities (Pros)**")
+            if market_env["pros"]:
+                for pro in market_env["pros"]: st.markdown(f"- {pro}")
+            else:
+                st.markdown("- No major trend advantages currently.")
+        with m_col2:
+            st.markdown("**🔴 Risks (Cons)**")
+            if market_env["cons"]:
+                for con in market_env["cons"]: st.markdown(f"- {con}")
+            else:
+                st.markdown("- Risk levels are normal.")
+                
+        st.caption(
+            f"📅 **Best Days to Trade:** {market_env['best_days_to_trade']}  |  "
+            f"⛔ **Avoid Hours:** {market_env['avoid_trading']}"
+        )
 
     # ── Vote Breakdown ─────────────────────────────────────────────
     st.divider()
@@ -533,10 +587,38 @@ if st.session_state["last_result"] is not None:
     if patterns and patterns != ["No clear pattern"]:
         st.markdown("**📊 Active Patterns:** " + "  ·  ".join(patterns))
 
-    # ── TRADE PLAN ─────────────────────────────────────────────────
-    if trade:
+    # ── WAIT Analysis ──────────────────────────────────────────────
+    if decision == "WAIT" and wait_analysis:
         st.divider()
-        st.markdown("## 📊 Trade Plan")
+        st.markdown("### 🟡 WAIT — Why Not Trading Now")
+        w1, w2 = st.columns([2, 1])
+        with w1:
+            st.error(f"**Reason:** {wait_analysis['reason']}")
+            st.markdown("**⚠️ Risk Factors**")
+            for rf in wait_analysis["risk_factors"]:
+                st.markdown(f"- {rf}")
+            st.markdown("**🎯 Wait For**")
+            for wf in wait_analysis["waiting_for"]:
+                st.markdown(f"- {wf}")
+            if wait_analysis.get("potential_loss"):
+                st.error(f"**Forcing a trade now risks:** {wait_analysis['potential_loss']}")
+        with w2:
+            st.warning(f"⏰ **Check again in:** {wait_analysis['next_check']}")
+            st.info(f"💡 **Recommendation:**\n{wait_analysis['recommendation']}")
+
+    # ── TRADE PLAN / HYPOTHETICAL SIZING ───────────────────────────
+    if trade:
+        is_hypo = trade.get("is_hypothetical", False)
+        st.divider()
+        if is_hypo:
+            st.markdown("## 📊 Hypothetical Trade Setup")
+            st.warning(
+                "⚠️ **Hypothetical Sizing Notice**: The current Council Decision is **WAIT**. "
+                "The levels and risk metrics below are calculated using active indicators and S/R levels. "
+                "If you decide to force-enter or override the wait signal, use these risk boundaries to protect your capital."
+            )
+        else:
+            st.markdown("## 📊 Trade Plan")
 
         rate = trade.get("usd_inr_rate", 84.0)
         atr_used = trade.get("atr_used", 0)
@@ -586,18 +668,26 @@ if st.session_state["last_result"] is not None:
 
         # ── Copyable Trade Card ──────────────────────────────────
         st.divider()
-        st.markdown("### 🚀 Copy Into Groww / Zerodha")
-        broker_note = {
-            "BUY":  "Groww/Zerodha → Search asset → CNC or MIS BUY order",
-            "SELL": "Groww/Zerodha → Search asset → CNC or MIS SELL/SHORT order",
-        }.get(decision, "")
+        if is_hypo:
+            st.markdown("### 🚀 Copy Into Groww / Zerodha (Hypothetical)")
+            card_title = f"📋  HYPOTHETICAL SETUP (OVERRIDE)  —  {asset_name} ({ticker})"
+            action_label = f"{trade['decision']} (WAIT OVERRIDE)"
+            broker_note = "Groww/Zerodha → Search asset → Place entry at pullback zone or wait for setup resolution."
+        else:
+            st.markdown("### 🚀 Copy Into Groww / Zerodha")
+            card_title = f"📋  TRADE SETUP  —  {asset_name} ({ticker})"
+            action_label = decision
+            broker_note = {
+                "BUY":  "Groww/Zerodha → Search asset → CNC or MIS BUY order",
+                "SELL": "Groww/Zerodha → Search asset → CNC or MIS SELL/SHORT order",
+            }.get(decision, "")
 
         st.code(f"""
 ╔═══════════════════════════════════════════════════════╗
-   📋  TRADE SETUP  —  {asset_name} ({ticker})
+   {card_title}
    Generated: {__import__('datetime').datetime.now().strftime('%Y-%m-%d %H:%M')}
 ╠═══════════════════════════════════════════════════════╣
-  Action        :  {decision}
+  Action        :  {action_label}
   Confidence    :  {conf}%
   Data Source   :  {data_source.upper()}
 
@@ -625,26 +715,6 @@ if st.session_state["last_result"] is not None:
 ╚═══════════════════════════════════════════════════════╝
 """, language="text")
         st.caption(f"💡 {broker_note}")
-
-    # ── WAIT Analysis ──────────────────────────────────────────────
-    else:
-        st.divider()
-        st.markdown("### 🟡 WAIT — Why Not Trading Now")
-        if wait_analysis:
-            w1, w2 = st.columns([2, 1])
-            with w1:
-                st.error(f"**Reason:** {wait_analysis['reason']}")
-                st.markdown("**⚠️ Risk Factors**")
-                for rf in wait_analysis["risk_factors"]:
-                    st.markdown(f"- {rf}")
-                st.markdown("**🎯 Wait For**")
-                for wf in wait_analysis["waiting_for"]:
-                    st.markdown(f"- {wf}")
-                if wait_analysis.get("potential_loss"):
-                    st.error(f"**Forcing a trade now risks:** {wait_analysis['potential_loss']}")
-            with w2:
-                st.warning(f"⏰ **Check again in:** {wait_analysis['next_check']}")
-                st.info(f"💡 **Recommendation:**\n{wait_analysis['recommendation']}")
 
     # ── Historical Memory ──────────────────────────────────────────
     past_signals = result.get("past_signals", [])

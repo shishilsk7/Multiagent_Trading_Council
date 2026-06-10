@@ -161,9 +161,6 @@ def levels(latest, decision, sr_zone_label,
            capital: float = 10_000.0, risk_percent: float = 1.0,
            ticker: str = "", usd_inr_rate: float = None):
 
-    if decision == "WAIT":
-        return None
-
     if usd_inr_rate is None:
         usd_inr_rate = get_usd_inr()
 

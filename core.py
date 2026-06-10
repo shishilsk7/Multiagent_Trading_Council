@@ -105,6 +105,62 @@ def analyze_wait_scenario(latest, tech, mom, news_text, risk_text):
     }
 
 
+def analyze_market_environment(latest, headlines):
+    adx = latest.get("adx", 20)
+    atr = latest.get("atr", 0)
+    price = latest.get("Close", 1)
+    atr_pct = (atr / price * 100) if price > 0 else 0
+    vol_ratio = latest.get("vol_ratio", 1.0)
+    
+    verdict = ""
+    suitability = ""
+    pros = []
+    cons = []
+    
+    # Trend Suitability
+    if adx > 25:
+        verdict = "🔥 Strong Trend Active (Directional trading highly favored)"
+        pros.append("Breakout trades have high follow-through probability")
+        pros.append("Moving averages (EMA) provide reliable trend signals")
+    elif adx < 15:
+        verdict = "💤 Choppy / Range-Bound (Consolidation market)"
+        cons.append("High risk of false breakouts; price tends to range-revert")
+        pros.append("Oscillators (RSI/Stochastic) are highly reliable for buy-low/sell-high entries")
+    else:
+        verdict = "🔄 Transitioning / Moderate Trend"
+        pros.append("Good environment for scaling into swing positions slowly")
+        
+    # Volatility Check
+    if atr_pct > 5:
+        verdict += " | ⚡ Extreme Volatility"
+        cons.append(f"ATR is very wide ({atr_pct:.1f}% of price) — stop losses will be hit by normal market noise")
+        suitability = "High risk environment. Scale down your position sizes by 50% to control risk."
+    elif atr_pct < 1.5:
+        verdict += " | 📉 Low Volatility Squeeze"
+        pros.append("Tight risk entries available. Large breakout expected soon.")
+        suitability = "Favorable for breakout setups."
+    else:
+        verdict += " | 📊 Stable Volatility"
+        suitability = "Standard volatility conditions. Standard stop buffers apply."
+        
+    # Liquidity / Volume Check
+    if vol_ratio > 1.5:
+        pros.append(f"Above average volume ({vol_ratio:.1f}x) confirms institutional momentum")
+    elif vol_ratio < 0.6:
+        cons.append("Very low volume — thin liquidity makes order slippage likely")
+        
+    # Summarize when to trade
+    playbook = {
+        "verdict": verdict,
+        "suitability": suitability,
+        "best_days_to_trade": "Tuesday through Thursday (highest global volume)",
+        "avoid_trading": "First 30 minutes of market open and Friday afternoons",
+        "pros": pros,
+        "cons": cons
+    }
+    return playbook
+
+
 def _run_llm_agents_parallel(latest, patterns, sr, vol, trend_str, mem_summary, headlines, ticker):
     """Run all 4 LLM agents in parallel using threads."""
     current_price = float(latest["Close"])
@@ -218,9 +274,20 @@ def run_enhanced_analysis(
     # ── 8. Trade plan or WAIT analysis ──────────────────────────────
     trade         = None
     wait_analysis = None
+    market_env    = analyze_market_environment(latest, headlines)
 
     if decision == "WAIT":
         wait_analysis = analyze_wait_scenario(latest, tech, mom, news_text, risk)
+        # Determine leaning direction for hypothetical trade levels based on votes
+        leaning_direction = "BUY" if vote_breakdown.get("total_buy", 0) >= vote_breakdown.get("total_sell", 0) else "SELL"
+        trade = levels(
+            latest, leaning_direction, sr,
+            capital=capital,
+            risk_percent=risk_percent,
+            ticker=ticker,
+        )
+        if trade:
+            trade["is_hypothetical"] = True
     else:
         trade = levels(
             latest, decision, sr,
@@ -229,6 +296,7 @@ def run_enhanced_analysis(
             ticker=ticker,
         )
         if trade:
+            trade["is_hypothetical"] = False
             record_signal(
                 ticker=ticker, decision=decision,
                 entry_price=current_price,
@@ -279,6 +347,7 @@ def run_enhanced_analysis(
         "patterns":       patterns,
         "vol_state":      vol,
         "df":             df,
+        "market_env":     market_env,
     }
 
 
