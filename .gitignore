@@ -35,5 +35,8 @@ Thumbs.db
 
 # Project-specific generated files
 decision_memory.json
+outcome_memory.json
 app_backup.py
 core_backup.py
+*.db
+*.db-journal

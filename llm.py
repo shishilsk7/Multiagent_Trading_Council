@@ -15,6 +15,12 @@ _OPENROUTER_MODELS = [
 
 _gemini_client = None
 _openrouter_client = None
+_last_error = "No errors logged yet."
+
+
+def get_last_error() -> str:
+    global _last_error
+    return _last_error
 
 
 def _get_gemini():
@@ -29,7 +35,9 @@ def _get_gemini():
         genai.configure(api_key=api_key)
         _gemini_client = genai.GenerativeModel("gemini-2.0-flash")
         return _gemini_client
-    except Exception:
+    except Exception as e:
+        global _last_error
+        _last_error = f"Gemini configuration failed: {e}"
         return None
 
 
@@ -44,11 +52,14 @@ def _get_openrouter():
         from openai import OpenAI
         _openrouter_client = OpenAI(api_key=api_key, base_url="https://openrouter.ai/api/v1")
         return _openrouter_client
-    except Exception:
+    except Exception as e:
+        global _last_error
+        _last_error = f"OpenRouter configuration failed: {e}"
         return None
 
 
 def _ask_gemini(prompt: str) -> str:
+    global _last_error
     client = _get_gemini()
     if not client:
         return ""
@@ -59,14 +70,17 @@ def _ask_gemini(prompt: str) -> str:
         )
         return response.text.strip() if response.text else ""
     except Exception as e:
+        _last_error = f"Gemini API Error: {e}"
         print(f"llm.py: Gemini failed: {e}")
         return ""
 
 
 def _ask_openrouter(prompt: str) -> str:
+    global _last_error
     client = _get_openrouter()
     if not client:
         return ""
+    errors = []
     for model in _OPENROUTER_MODELS:
         try:
             res = client.chat.completions.create(
@@ -81,10 +95,13 @@ def _ask_openrouter(prompt: str) -> str:
                 return text.strip()
         except Exception as e:
             err = str(e)
+            errors.append(f"{model}: {err[:80]}")
             if "429" in err:
                 time.sleep(5)
             print(f"llm.py: {model} failed: {err[:80]}")
             continue
+    if errors:
+        _last_error = "OpenRouter errors: " + " | ".join(errors)
     return ""
 
 
@@ -109,3 +126,42 @@ def check_llm_connectivity() -> tuple[bool, str]:
     if os.getenv("OPENROUTER_API_KEY"):
         return True, "OpenRouter ✅ (key set)"
     return False, "No API keys configured — set GEMINI_API_KEY or OPENROUTER_API_KEY"
+
+
+def test_llm_connectivity_live() -> tuple[bool, str]:
+    """Perform a live probe to check if the API key is active and working."""
+    global _last_error
+    
+    # Try Gemini if key is set
+    if os.getenv("GEMINI_API_KEY"):
+        client = _get_gemini()
+        if not client:
+            return False, "Gemini initialization failed (check package import)"
+        try:
+            # Send a tiny prompt to check API key validity
+            response = client.generate_content("ping", generation_config={"max_output_tokens": 5})
+            if response.text:
+                return True, "Gemini connection verified! API key is active and working."
+        except Exception as e:
+            _last_error = f"Gemini Live Probe Failed: {e}"
+            return False, f"Gemini connection test failed: {e}"
+
+    # Try OpenRouter if key is set
+    if os.getenv("OPENROUTER_API_KEY"):
+        client = _get_openrouter()
+        if not client:
+            return False, "OpenRouter initialization failed"
+        try:
+            res = client.chat.completions.create(
+                model="meta-llama/llama-3.1-8b-instruct:free",
+                messages=[{"role": "user", "content": "ping"}],
+                max_tokens=5,
+                timeout=10,
+            )
+            if res.choices[0].message.content:
+                return True, "OpenRouter connection verified! API key is active and working."
+        except Exception as e:
+            _last_error = f"OpenRouter Live Probe Failed: {e}"
+            return False, f"OpenRouter connection test failed: {e}"
+
+    return False, "No API keys found. Set GEMINI_API_KEY or OPENROUTER_API_KEY first."

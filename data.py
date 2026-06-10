@@ -17,7 +17,7 @@ except ImportError:
 
 
 # Minimum candles needed for all indicators (EMA50 + ADX14)
-_MIN_CANDLES = 20  # hard floor — RSI/ADX need at least 14 periods to be valid
+_MIN_CANDLES = 120  # Warmed-up floor to ensure EMA50 and ADX14 calculate without NaNs
 
 # How many candles per day each interval produces (conservative estimate for NSE)
 _CANDLES_PER_DAY = {
@@ -61,14 +61,17 @@ def fetch_ticker_timeframe(ticker: str, period: str = "1d", interval: str = "5m"
     max_p     = _MAX_PERIOD.get(interval, "60d")
 
     # Parse requested period into days
-    _p_days = {"1d": 1, "2d": 2, "3d": 3, "5d": 5, "7d": 7, "10d": 10,
-               "14d": 14, "30d": 30, "60d": 60}
+    _p_days = {
+        "1d": 1, "2d": 2, "3d": 3, "5d": 5, "7d": 7, "10d": 10, "14d": 14, "30d": 30, "60d": 60,
+        "1mo": 30, "3mo": 90, "6mo": 180, "1y": 365, "2y": 730, "max": 9999
+    }
     req_days = _p_days.get(period, 1)
+    target_days = max(req_days, days_req)
 
-    # Candidate periods: start from max(requested, needed), step up
+    # Candidate periods: start from target_days and step up
     candidates = []
     for p, d in sorted(_p_days.items(), key=lambda x: x[1]):
-        if d >= req_days and d >= max(req_days, 1):
+        if d >= target_days:
             candidates.append(p)
         if len(candidates) >= 5:
             break

@@ -44,12 +44,24 @@ if api_ok and "llm_status" not in st.session_state:
     llm_ok, llm_msg = check_llm_connectivity()
     st.session_state["llm_status"] = (llm_ok, llm_msg)
 
-if "llm_status" in st.session_state:
-    llm_ok, llm_msg = st.session_state["llm_status"]
-    if llm_ok:
-        st.caption(f"🤖 LLM: ✅ {llm_msg}")
-    else:
-        st.warning(f"🤖 LLM: ⚠️ {llm_msg}")
+col_conn1, col_conn2 = st.columns([3, 1])
+with col_conn1:
+    if "llm_status" in st.session_state:
+        llm_ok, llm_msg = st.session_state["llm_status"]
+        if llm_ok:
+            st.caption(f"🤖 LLM: ✅ {llm_msg}")
+        else:
+            st.warning(f"🤖 LLM: ⚠️ {llm_msg}")
+with col_conn2:
+    if api_ok:
+        if st.button("🧪 Test API", use_container_width=True):
+            from llm import test_llm_connectivity_live
+            with st.spinner("Testing API key..."):
+                ok, msg = test_llm_connectivity_live()
+            if ok:
+                st.success(msg)
+            else:
+                st.error(msg)
 st.divider()
 
 # ── Sidebar ──────────────────────────────────────────────────────────
@@ -122,15 +134,19 @@ try:
     with st.spinner("Fetching price..."):
         snap = _cached_snapshot(ticker)
     if not snap.empty and snap.attrs.get("source") != "mock":
-        cp  = snap.iloc[-1]["Close"]
-        chg = cp - snap.iloc[0]["Close"]
-        pct = chg / snap.iloc[0]["Close"] * 100
+        # Keep only the last 24h worth of candles for the daily snapshot metrics
+        # NSE has 74 5-min candles, Crypto has 288 5-min candles.
+        cpd = 74 if (ticker.endswith(".NS") or ticker.endswith(".BO")) else 288
+        day_snap = snap.iloc[-min(len(snap), cpd):]
+        cp  = day_snap.iloc[-1]["Close"]
+        chg = cp - day_snap.iloc[0]["Close"]
+        pct = chg / day_snap.iloc[0]["Close"] * 100
         cur = currency_label(ticker)
         c1, c2, c3, c4 = st.columns(4)
         c1.metric("Price",    f"{cur}{cp:,.4f}", f"{pct:+.2f}%")
-        c2.metric("24h High", f"{cur}{snap['High'].max():,.4f}")
-        c3.metric("24h Low",  f"{cur}{snap['Low'].min():,.4f}")
-        c4.metric("Volume",   f"{snap['Volume'].sum()/1e6:.2f}M")
+        c2.metric("24h High", f"{cur}{day_snap['High'].max():,.4f}")
+        c3.metric("24h Low",  f"{cur}{day_snap['Low'].min():,.4f}")
+        c4.metric("Volume",   f"{day_snap['Volume'].sum()/1e6:.2f}M")
     else:
         st.warning("⚠️ Live price unavailable. Check connection before analysing.")
 except Exception:
@@ -169,21 +185,21 @@ Always set stop-losses before entering any trade.
 # ══════════════════════════════════════════════════════════════════════
 if run_scan and scan_enabled and scan_tickers:
     from core import run_enhanced_analysis
+    import concurrent.futures
     import pandas as pd
 
     st.subheader("🔄 Multi-Asset Scan")
     scan_results = []
-    prog = st.progress(0, text="Scanning...")
-
-    for i, t in enumerate(scan_tickers):
-        prog.progress((i + 1) / len(scan_tickers), text=f"Scanning {t}…")
+    
+    # Run the scans in parallel using ThreadPoolExecutor
+    def scan_single_ticker(t):
         try:
             r = run_enhanced_analysis(
                 ticker=t, period=period, interval=final_interval,
                 capital=capital, risk_percent=risk_percent,
             )
             trade = r.get("trade") or {}
-            scan_results.append({
+            return {
                 "Ticker":     t,
                 "Asset":      UNIVERSE[t][0],
                 "Signal":     r["decision"],
@@ -195,15 +211,23 @@ if run_scan and scan_enabled and scan_tickers:
                 "R:R":        f"1:{trade.get('risk_reward_ratio','—')}" if trade else "—",
                 "Target":     f"{currency_label(t)}{trade['target_price']:,.4f}" if trade else "—",
                 "Stop":       f"{currency_label(t)}{trade['stop_loss']:,.4f}" if trade else "—",
-            })
+            }
         except Exception as e:
-            scan_results.append({
+            return {
                 "Ticker": t, "Asset": UNIVERSE[t][0],
                 "Signal": "ERROR", "Conf %": "—", "Price": "—",
                 "RSI": "—", "ADX": "—", "Zone": str(e)[:50],
                 "R:R": "—", "Target": "—", "Stop": "—",
-            })
-    prog.empty()
+            }
+
+    with st.spinner(f"Scanning {len(scan_tickers)} assets in parallel..."):
+        with concurrent.futures.ThreadPoolExecutor(max_workers=min(len(scan_tickers), 10)) as executor:
+            futures = [executor.submit(scan_single_ticker, t) for t in scan_tickers]
+            for future in concurrent.futures.as_completed(futures):
+                scan_results.append(future.result())
+
+    # Sort results by Ticker to keep UI clean and deterministic
+    scan_results.sort(key=lambda x: x["Ticker"])
 
     df_scan = pd.DataFrame(scan_results)
 
@@ -514,13 +538,24 @@ if st.session_state["last_result"] is not None:
     # ── Agent Detail ───────────────────────────────────────────────
     st.divider()
     st.subheader("🧠 Agent Reasoning")
-    with st.expander("📉 Technical Agent",             expanded=False): st.write(result["technical"])
-    with st.expander("⚡ Momentum Agent",              expanded=False): st.write(result["momentum"])
+    
+    from llm import get_last_error
+    last_err = get_last_error()
+    
+    def render_agent_output(val):
+        if "all LLMs unavailable" in str(val):
+            st.error("❌ LLM Call Failed: All models unavailable.")
+            st.info(f"🔍 **Last Captured API Error:**\n`{last_err}`")
+        else:
+            st.write(val)
+
+    with st.expander("📉 Technical Agent",             expanded=False): render_agent_output(result["technical"])
+    with st.expander("⚡ Momentum Agent",              expanded=False): render_agent_output(result["momentum"])
     with st.expander("📰 News Agent",                  expanded=False):
         if result.get("headlines"):
             st.markdown("**Headlines used:**")
             for h in result["headlines"]: st.markdown(f"- {h}")
             st.divider()
-        st.write(result["news"])
-    with st.expander("🛡️ Risk Agent",                  expanded=False): st.write(result["risk"])
+        render_agent_output(result["news"])
+    with st.expander("🛡️ Risk Agent",                  expanded=False): render_agent_output(result["risk"])
     with st.expander("🗂️ Decision Memory (last 10)",   expanded=False): st.json(result["memory"])
