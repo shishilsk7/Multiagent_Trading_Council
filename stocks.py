@@ -91,3 +91,56 @@ def is_indian(ticker):
 def currency_label(ticker):
     """Returns ₹ for Indian stocks, $ for everything else."""
     return "₹" if is_indian(ticker) else "$"
+
+
+_TRADINGVIEW_SYMBOLS = {
+    # Crypto
+    "BTC-USD": "BINANCE:BTCUSDT",
+    "ETH-USD": "BINANCE:ETHUSDT",
+    "SOL-USD": "BINANCE:SOLUSDT",
+    "BNB-USD": "BINANCE:BNBUSDT",
+    "XRP-USD": "BINANCE:XRPUSDT",
+    # Commodities / ETFs
+    "GC=F": "COMEX:GC1!",
+    "SI=F": "COMEX:SI1!",
+    "GLD": "NYSEARCA:GLD",
+    "SLV": "NYSEARCA:SLV",
+    # US stocks
+    "NVDA": "NASDAQ:NVDA",
+    "MSFT": "NASDAQ:MSFT",
+    "AAPL": "NASDAQ:AAPL",
+    "GOOGL": "NASDAQ:GOOGL",
+    "META": "NASDAQ:META",
+    "AMZN": "NASDAQ:AMZN",
+    "TSLA": "NASDAQ:TSLA",
+    "PLTR": "NYSE:PLTR",
+    "ARM": "NASDAQ:ARM",
+    "CRWD": "NASDAQ:CRWD",
+    "MSTR": "NASDAQ:MSTR",
+    "JPM": "NYSE:JPM",
+    "GS": "NYSE:GS",
+    # India stocks
+    "RELIANCE.NS": "NSE:RELIANCE",
+    "TCS.NS": "NSE:TCS",
+    "HDFCBANK.NS": "NSE:HDFCBANK",
+    "INFY.NS": "NSE:INFY",
+    "ICICIBANK.NS": "NSE:ICICIBANK",
+    "HINDUNILVR.NS": "NSE:HINDUNILVR",
+    "ITC.NS": "NSE:ITC",
+    "SBIN.NS": "NSE:SBIN",
+    "BHARTIARTL.NS": "NSE:BHARTIARTL",
+    "KOTAKBANK.NS": "NSE:KOTAKBANK",
+    "TATAMOTORS.NS": "NSE:TATAMOTORS",
+    "WIPRO.NS": "NSE:WIPRO",
+    "ADANIENT.NS": "NSE:ADANIENT",
+    "BAJFINANCE.NS": "NSE:BAJFINANCE",
+    "ZOMATO.NS": "NSE:ZOMATO",
+    "NYKAA.NS": "NSE:NYKAA",
+    "PAYTM.NS": "NSE:PAYTM",
+    "^NSEI": "NSE:NIFTY",
+    "^BSESN": "BSE:SENSEX",
+}
+
+
+def get_tradingview_symbol(ticker):
+    return _TRADINGVIEW_SYMBOLS.get(ticker, ticker)

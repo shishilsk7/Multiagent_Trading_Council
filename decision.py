@@ -66,7 +66,7 @@ def _indicator_votes(latest: dict) -> tuple[int, int, int, int]:
     rsi       = latest.get("rsi", 50)
     macd_hist = latest.get("macd_hist", 0)
     ema9      = latest.get("ema9",  0)
-    ema20     = latest.get("ema20", 0)
+    ema35     = latest.get("ema35", 0)
     ema50     = latest.get("ema50", 0)
     stoch_k   = latest.get("stoch_k", 50)
     adx       = latest.get("adx", 0)
@@ -83,8 +83,8 @@ def _indicator_votes(latest: dict) -> tuple[int, int, int, int]:
     else:             ind_sell += 1
 
     # EMA full alignment
-    if ema9 > ema20 > ema50:   ind_buy  += 1
-    elif ema9 < ema20 < ema50: ind_sell += 1
+    if ema9 > ema35 > ema50:   ind_buy  += 1
+    elif ema9 < ema35 < ema50: ind_sell += 1
 
     # Stochastic
     if stoch_k < 30:   ind_buy  += 1
@@ -106,8 +106,17 @@ def _indicator_votes(latest: dict) -> tuple[int, int, int, int]:
     return buy_v, sell_v, ind_buy, ind_sell
 
 
+def _timeframe_gate(interval: str):
+    interval = (interval or "").lower()
+    if interval in ("1m", "5m"):
+        return 55, 2
+    if interval == "15m":
+        return 50, 1
+    return 45, 1
+
+
 def decide(tech: str, mom: str, risk: str, latest: dict = None,
-           confidence_score: int = None) -> tuple[str, dict]:
+           confidence_score: int = None, interval: str = "") -> tuple[str, dict]:
     """
     Returns (decision, vote_detail_dict).
     decision: 'BUY' / 'SELL' / 'WAIT'
@@ -188,16 +197,17 @@ def decide(tech: str, mom: str, risk: str, latest: dict = None,
             return "WAIT", breakdown
 
         # 2. Minimum confidence threshold
-        if confidence_score is not None and confidence_score < 45:
+        min_conf, min_llm = _timeframe_gate(interval)
+        if confidence_score is not None and confidence_score < min_conf:
             breakdown["reason"] = (
                 f"Near-miss ({lead_votes}/7 votes) + low confidence ({confidence_score}%) — WAIT"
             )
             return "WAIT", breakdown
 
         # 3. At least 1 LLM agent must agree — pure indicator math isn't enough
-        if llm_agree == 0:
+        if llm_agree < min_llm:
             breakdown["reason"] = (
-                f"Near-miss ({lead_votes}/7 votes) — indicators only, no LLM agreement — WAIT"
+                f"Near-miss ({lead_votes}/7 votes) — insufficient LLM agreement for {interval or 'default'} timeframe — WAIT"
             )
             return "WAIT", breakdown
 

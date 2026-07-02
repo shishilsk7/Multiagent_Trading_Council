@@ -19,6 +19,7 @@ from confidence import confidence
 from trade_levels import levels
 from memory import load, add, summarize
 from stocks import get_news_query
+from market_calendar import get_market_status
 from outcome_memory import (
     record_signal, update_outcome,
     get_similar_past_signals, get_ticker_stats
@@ -58,10 +59,10 @@ def analyze_wait_scenario(latest, tech, mom, news_text, risk_text):
         risk_factors.append("May fall further before bouncing")
         waiting_for.append("RSI stabilization above 35")
 
-    if latest.get("ema20", 0) < latest.get("ema50", 0):
-        reasons.append("Bearish EMA alignment (EMA20 < EMA50)")
+    if latest.get("ema35", 0) < latest.get("ema50", 0):
+        reasons.append("Bearish EMA alignment (EMA35 < EMA50)")
         risk_factors.append("Counter-trend trade — higher failure rate")
-        waiting_for.append("EMA20 crosses back above EMA50")
+        waiting_for.append("EMA35 crosses back above EMA50")
 
     if adx < 15:
         reasons.append(f"ADX {adx:.1f} — choppy, no clear trend")
@@ -216,6 +217,40 @@ def run_enhanced_analysis(
     capital: float = 50_000.0,
     risk_percent: float = 1.0,
 ):
+    market_status = get_market_status(ticker)
+    if not market_status["is_open"]:
+        return {
+            "ticker": ticker,
+            "decision": "MARKET_CLOSED",
+            "confidence": 0,
+            "vote_breakdown": {},
+            "trade": None,
+            "wait_analysis": None,
+            "technical": None,
+            "momentum": None,
+            "news": None,
+            "headlines": [],
+            "risk": None,
+            "memory": load(),
+            "sr_zone": None,
+            "trend_str": None,
+            "current_price": None,
+            "data_source": "n/a",
+            "data_points": 0,
+            "interval": interval,
+            "atr": 0.0,
+            "adx": 0.0,
+            "rsi": 0.0,
+            "macd_hist": 0.0,
+            "past_signals": [],
+            "ticker_stats": get_ticker_stats(ticker),
+            "patterns": [],
+            "vol_state": None,
+            "df": None,
+            "market_env": None,
+            "market_status": market_status,
+        }
+
     # ── 1. Fetch data ───────────────────────────────────────────────
     df = fetch_ticker_timeframe(ticker, period=period, interval=interval)
     if df.empty:
@@ -268,10 +303,15 @@ def run_enhanced_analysis(
     )
 
     # ── 6. Confidence first (needed for near-miss gate in decide) ──
-    conf = confidence(tech, mom, news_text, risk, latest=dict(latest))
+    conf = confidence(tech, mom, news_text, risk, latest=dict(latest), interval=final_interval)
 
     # ── 7. Decision with confidence gate ────────────────────────────
-    decision, vote_breakdown = decide(tech, mom, risk, latest=dict(latest), confidence_score=conf)
+    decision, vote_breakdown = decide(
+        tech, mom, risk,
+        latest=dict(latest),
+        confidence_score=conf,
+        interval=final_interval,
+    )
 
     # ── 8. Trade plan or WAIT analysis ──────────────────────────────
     trade         = None
@@ -287,6 +327,7 @@ def run_enhanced_analysis(
             capital=capital,
             risk_percent=risk_percent,
             ticker=ticker,
+            interval=final_interval,
         )
         if trade:
             trade["is_hypothetical"] = True
@@ -296,6 +337,7 @@ def run_enhanced_analysis(
             capital=capital,
             risk_percent=risk_percent,
             ticker=ticker,
+            interval=final_interval,
         )
         if trade:
             trade["is_hypothetical"] = False
@@ -309,6 +351,9 @@ def run_enhanced_analysis(
                 adx=float(latest.get("adx", 0)),
                 macd_hist=float(latest.get("macd_hist", 0)),
                 sr_zone=sr,
+                entry_low=trade.get("entry_zone_low"),
+                entry_high=trade.get("entry_zone_high"),
+                interval=final_interval,
             )
 
     # ── 9. Historical context ────────────────────────────────────────

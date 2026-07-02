@@ -58,29 +58,83 @@ def _asset_atr_multiplier(ticker: str):
         return 1.2, 2.4   # US stocks: standard
 
 
-def calculate_entry_zone(latest, sr_zone, decision, ticker=""):
+def _timeframe_profile(interval: str):
+    interval = (interval or "").lower()
+    profiles = {
+        "1m": {"entry": 0.10, "stop": 0.80, "target": 0.90, "min_rr": 1.2},
+        "5m": {"entry": 0.14, "stop": 0.90, "target": 0.95, "min_rr": 1.25},
+        "15m": {"entry": 0.18, "stop": 0.95, "target": 1.00, "min_rr": 1.35},
+        "1h": {"entry": 0.28, "stop": 1.00, "target": 1.00, "min_rr": 1.5},
+        "1d": {"entry": 0.35, "stop": 1.10, "target": 1.10, "min_rr": 1.5},
+    }
+    return profiles.get(interval, {"entry": 0.25, "stop": 1.0, "target": 1.0, "min_rr": 1.4})
+
+
+def _fib_confluence(latest, decision):
+    fib_map = {
+        "fib_500": (latest.get("fib_500"), "Fib 50.0%"),
+        "fib_618": (latest.get("fib_618"), "Fib 61.8%"),
+    }
+    price = float(latest["Close"])
+    trend_up = float(latest.get("fib_trend", 1)) >= 0
+    values = [
+        (key, float(val), label)
+        for key, (val, label) in fib_map.items()
+        if val not in (None, 0) and not str(val).lower() == "nan"
+    ]
+    if not values:
+        return None, None
+
+    if decision == "BUY":
+        candidates = [item for item in values if item[1] < price]
+        if not candidates:
+            return None, None
+        anchor = max(candidates, key=lambda item: item[1])
+        label = f"{anchor[2]} pullback" if trend_up else f"Counter-trend {anchor[2].lower()} support"
+        return anchor[1], label
+
+    if decision == "SELL":
+        candidates = [item for item in values if item[1] > price]
+        if not candidates:
+            return None, None
+        anchor = min(candidates, key=lambda item: item[1])
+        label = f"{anchor[2]} retracement" if not trend_up else f"Counter-trend {anchor[2].lower()} resistance"
+        return anchor[1], label
+
+    return None, None
+
+
+def calculate_entry_zone(latest, sr_zone, decision, ticker="", interval=""):
     price      = float(latest["Close"])
     support    = float(latest["support"])
     resistance = float(latest["resistance"])
     atr        = float(latest.get("atr", price * 0.01))
 
     stop_mult, target_mult = _asset_atr_multiplier(ticker)
+    tf = _timeframe_profile(interval)
 
-    # Entry zone = ±0.5 ATR from current price (tight but realistic)
-    entry_buffer = atr * 0.3
+    # Entry zone scales with timeframe; shorter intervals need tighter pullbacks.
+    entry_buffer = atr * tf["entry"]
+    fib_anchor, fib_label = _fib_confluence(latest, decision)
 
     if decision == "BUY":
-        entry_low  = round(price - entry_buffer, 4)
-        entry_high = round(price + entry_buffer * 0.5, 4)
-        stop       = round(price - (atr * stop_mult), 4)
-        target     = round(price + (atr * target_mult), 4)
+        anchor = fib_anchor if fib_anchor and fib_anchor < price else price
+        entry_low  = round(min(price, anchor) - entry_buffer, 4)
+        entry_high = round(anchor + entry_buffer * 0.5, 4)
+        stop       = round(price - (atr * stop_mult * tf["stop"]), 4)
+        target     = round(price + (atr * target_mult * tf["target"]), 4)
 
         # Respect S/R: don't place stop above support if near it
         if sr_zone == "Near Support" and support < price:
             stop = round(min(stop, support * 0.997), 4)
+        if fib_anchor and fib_anchor < price:
+            entry_low = round(min(entry_low, fib_anchor - entry_buffer * 0.5), 4)
+            entry_high = round(max(entry_high, fib_anchor + entry_buffer * 0.5), 4)
 
         if sr_zone == "Near Support":
             timing = f"Buy near support zone (${support:,.2f}). Dip to entry low is ideal."
+        elif fib_anchor:
+            timing = f"Buy on Fibonacci pullback near ${fib_anchor:,.2f}. Wait for confirmation candle."
         elif sr_zone == "Near Resistance":
             timing = f"Wait for breakout above resistance (${resistance:,.2f}) before entering."
         elif sr_zone == "Below BB Lower (Oversold)":
@@ -89,17 +143,23 @@ def calculate_entry_zone(latest, sr_zone, decision, ticker=""):
             timing = "Enter on slight pullback or current price."
 
     elif decision == "SELL":
-        entry_low  = round(price - entry_buffer * 0.5, 4)
-        entry_high = round(price + entry_buffer, 4)
-        stop       = round(price + (atr * stop_mult), 4)
-        target     = round(price - (atr * target_mult), 4)
+        anchor = fib_anchor if fib_anchor and fib_anchor > price else price
+        entry_low  = round(anchor - entry_buffer * 0.5, 4)
+        entry_high = round(max(price, anchor) + entry_buffer, 4)
+        stop       = round(price + (atr * stop_mult * tf["stop"]), 4)
+        target     = round(price - (atr * target_mult * tf["target"]), 4)
 
         # Respect S/R
         if sr_zone == "Near Resistance" and resistance > price:
             stop = round(max(stop, resistance * 1.003), 4)
+        if fib_anchor and fib_anchor > price:
+            entry_low = round(min(entry_low, fib_anchor - entry_buffer * 0.5), 4)
+            entry_high = round(max(entry_high, fib_anchor + entry_buffer * 0.5), 4)
 
         if sr_zone == "Near Resistance":
             timing = f"Sell near resistance zone (${resistance:,.2f}). Ideal short entry."
+        elif fib_anchor:
+            timing = f"Sell on Fibonacci retracement near ${fib_anchor:,.2f}. Wait for rejection candle."
         elif sr_zone == "Near Support":
             timing = f"Breakdown below support (${support:,.2f}) confirms sell. Wait for close below."
         elif sr_zone == "Above BB Upper (Overbought)":
@@ -126,6 +186,8 @@ def calculate_entry_zone(latest, sr_zone, decision, ticker=""):
         "target":     target,
         "timing":     timing,
         "atr_used":   round(atr, 4),
+        "fib_anchor": round(fib_anchor, 4) if fib_anchor else None,
+        "fib_label":  fib_label,
     }
 
 
@@ -159,13 +221,13 @@ def calculate_expected_outcome(position, entry, target, stop):
 
 def levels(latest, decision, sr_zone_label,
            capital: float = 10_000.0, risk_percent: float = 1.0,
-           ticker: str = "", usd_inr_rate: float = None):
+           ticker: str = "", interval: str = "", usd_inr_rate: float = None):
 
     if usd_inr_rate is None:
         usd_inr_rate = get_usd_inr()
 
     price      = float(latest["Close"])
-    entry_data = calculate_entry_zone(latest, sr_zone_label, decision, ticker=ticker)
+    entry_data = calculate_entry_zone(latest, sr_zone_label, decision, ticker=ticker, interval=interval)
     if not entry_data:
         return None
 
@@ -182,10 +244,11 @@ def levels(latest, decision, sr_zone_label,
     rate = usd_inr_rate
 
     rr = outcome["risk_reward"]
+    min_rr = _timeframe_profile(interval)["min_rr"]
     if rr < 1.0:
         rr_verdict = "❌ Poor R:R — skip this trade"
         rr_color   = "red"
-    elif rr < 1.5:
+    elif rr < min_rr:
         rr_verdict = "⚠️ Below average R:R — trade small or skip"
         rr_color   = "orange"
     elif rr < 2.0:
@@ -205,6 +268,9 @@ def levels(latest, decision, sr_zone_label,
         "target_price":        entry_data["target"],
         "timing":              entry_data["timing"],
         "atr_used":            entry_data["atr_used"],
+        "fib_anchor":          entry_data["fib_anchor"],
+        "fib_label":           entry_data["fib_label"],
+        "timeframe":           interval or "1h",
 
         # INR fields
         "capital_inr":         round(capital, 2),

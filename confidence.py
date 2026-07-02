@@ -41,7 +41,7 @@ def _parse_direction(text: str) -> str:
     return "WAIT"
 
 
-def confidence(tech, mom, news, risk, latest=None) -> int:
+def confidence(tech, mom, news, risk, latest=None, interval: str = "") -> int:
     """
     Returns confidence score 10–88.
 
@@ -142,5 +142,11 @@ def confidence(tech, mom, news, risk, latest=None) -> int:
 
         # Bollinger squeeze = pre-breakout uncertainty (direction unknown)
         if bb_width < 0.02: score -= 5
+
+    interval = (interval or "").lower()
+    if interval in ("1m", "5m"):
+        score -= 6
+    elif interval == "15m":
+        score -= 3
 
     return max(10, min(88, score))

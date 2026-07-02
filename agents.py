@@ -11,8 +11,8 @@ Fixes from v1:
 
 def technical_agent(latest, patterns, sr, volume, trend_str, memory):
     ema_trend = (
-        "Bullish (EMA9>EMA20>EMA50)" if latest['ema9'] > latest['ema20'] > latest['ema50']
-        else "Bearish (EMA9<EMA20<EMA50)" if latest['ema9'] < latest['ema20'] < latest['ema50']
+        "Bullish (EMA9>EMA35>EMA50)" if latest['ema9'] > latest['ema35'] > latest['ema50']
+        else "Bearish (EMA9<EMA35<EMA50)" if latest['ema9'] < latest['ema35'] < latest['ema50']
         else "Mixed / transitioning"
     )
     rsi = latest['rsi']
@@ -64,14 +64,14 @@ def momentum_agent(latest):
     macd_dir  = "positive — bullish momentum" if latest['macd_hist'] > 0 else "negative — bearish momentum"
     stoch_dir = "oversold (<30) — bounce likely" if latest['stoch_k'] < 30 else (
                 "overbought (>70) — pullback likely" if latest['stoch_k'] > 70 else "neutral")
-    ema_cross = "bullish crossover" if latest['ema9'] > latest['ema20'] else "bearish crossover"
+    ema_cross = "bullish crossover" if latest['ema9'] > latest['ema35'] else "bearish crossover"
     rsi_dir   = "below 50 — momentum tilts bullish" if latest['rsi'] < 50 else "above 50 — momentum tilts bearish"
 
     # Count signals for clarity
     bullish = sum([
         latest['macd_hist'] > 0,
         latest['stoch_k'] < 50,
-        latest['ema9'] > latest['ema20'],
+        latest['ema9'] > latest['ema35'],
         latest['rsi'] < 50,
     ])
     bearish = 4 - bullish
@@ -82,7 +82,7 @@ def momentum_agent(latest):
 RSI(14):    {latest['rsi']:.1f}  [{rsi_dir}]
 MACD Hist:  {latest['macd_hist']:.6f}  [{macd_dir}]
 Stoch K:    {latest['stoch_k']:.1f}  [{stoch_dir}]
-EMA 9/20:   [{ema_cross}]
+EMA 9/35:   [{ema_cross}]
 
 Bullish signals: {bullish}/4
 Bearish signals: {bearish}/4

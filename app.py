@@ -1,4 +1,5 @@
 import os
+from urllib.parse import quote
 from dotenv import load_dotenv
 import streamlit as st
 
@@ -30,7 +31,8 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-from stocks import UNIVERSE, CATEGORIES, ticker_label, currency_label
+from stocks import UNIVERSE, CATEGORIES, ticker_label, currency_label, get_tradingview_symbol, is_indian
+from market_calendar import get_market_status
 from llm import check_llm_connectivity
 
 st.title("📈 AI Trading Council")
@@ -79,8 +81,20 @@ with st.expander("🔍 View Today's Key Market Setups (Dynamic Scan)", expanded=
         from core import run_enhanced_analysis
         
         watchlist_tickers = ["WIPRO.NS", "RELIANCE.NS", "PLTR", "BTC-USD", "NVDA"]
+        nse_status = get_market_status("RELIANCE.NS")
+        nse_open = nse_status["is_open"]
         
         def scan_watchlist_ticker(t):
+            if is_indian(t) and not nse_open:
+                return t, {
+                    "ticker": t,
+                    "decision": "MARKET_CLOSED",
+                    "market_status": nse_status,
+                    "current_price": None,
+                    "confidence": 0,
+                    "trade": None,
+                    "sr_zone": None,
+                }
             try:
                 # Use 1h timeframe for swing setups
                 r = run_enhanced_analysis(ticker=t, period="1mo", interval="1h")
@@ -98,6 +112,9 @@ with st.expander("🔍 View Today's Key Market Setups (Dynamic Scan)", expanded=
                 continue
                 
             decision = r["decision"]
+            if decision == "MARKET_CLOSED":
+                st.warning(f"⏸️ {t}: {r.get('market_status', {}).get('message', 'Market closed')}")
+                continue
             price = r["current_price"]
             df_ticker = r["df"]
             support = float(df_ticker.iloc[-1].get("support", 0.0))
@@ -236,9 +253,10 @@ with st.sidebar:
     st.divider()
     st.subheader("📈 Live Chart")
     chart_src = st.radio("Provider", ["TradingView", "Binance", "Yahoo"])
-    sym = ticker.replace("-USD", "USD").replace("-", "")
+    tv_sym = get_tradingview_symbol(ticker)
     if chart_src == "TradingView":
-        chart_url = f"https://www.tradingview.com/chart/?symbol={sym}"
+        chart_url = f"https://www.tradingview.com/chart/?symbol={quote(tv_sym, safe='')}"
+        st.caption(f"TradingView symbol: {tv_sym}")
     elif chart_src == "Binance":
         bsym = ticker.replace("-USD", "USDT").replace("-", "")
         chart_url = f"https://www.binance.com/en/trade/{bsym}"
@@ -410,6 +428,11 @@ if st.session_state["last_result"] is not None:
     breakdown     = result.get("vote_breakdown", {})
     data_source   = result["data_source"]
 
+    if decision == "MARKET_CLOSED":
+        st.warning(f"⏸️ {result.get('market_status', {}).get('message', 'Market closed')}")
+        st.info("No analysis was run, so this does not count as WAIT or a trade signal.")
+        st.stop()
+
     actual_interval = result.get("interval", final_interval)
     st.success(f"✅ Live data: **{data_source.upper()}** · {result['data_points']} candles · {lookback_label} @ {actual_interval}")
     if actual_interval != final_interval:
@@ -473,7 +496,7 @@ if st.session_state["last_result"] is not None:
           * The thin line 'wicks' at the top/bottom show the highest and lowest prices reached during that candle interval.
         * **Moving Averages (Lines overlaying the price)**:
           * **EMA 9 (Blue)**: Short-term momentum trend.
-          * **EMA 20 (Yellow)**: Medium-term trend.
+          * **EMA 35 (Yellow)**: Medium-term trend.
           * **EMA 50 (Purple)**: Major trend direction.
           * *When fast lines (Blue) cross above slow lines (Purple), it signals a bullish momentum shift.*
         * **Horizontal Dashed Lines**:
@@ -520,8 +543,8 @@ if st.session_state["last_result"] is not None:
             # EMA Indicators
             if "ema9" in plot_df.columns:
                 fig.add_trace(go.Scatter(x=plot_df.index, y=plot_df["ema9"], name="EMA 9", line=dict(color="#3b82f6", width=1.0)), row=1, col=1)
-            if "ema20" in plot_df.columns:
-                fig.add_trace(go.Scatter(x=plot_df.index, y=plot_df["ema20"], name="EMA 20", line=dict(color="#eab308", width=1.0)), row=1, col=1)
+            if "ema35" in plot_df.columns:
+                fig.add_trace(go.Scatter(x=plot_df.index, y=plot_df["ema35"], name="EMA 35", line=dict(color="#eab308", width=1.0)), row=1, col=1)
             if "ema50" in plot_df.columns:
                 fig.add_trace(go.Scatter(x=plot_df.index, y=plot_df["ema50"], name="EMA 50", line=dict(color="#a855f7", width=1.5)), row=1, col=1)
 
@@ -538,6 +561,26 @@ if st.session_state["last_result"] is not None:
             if resistance_val > 0:
                 fig.add_hline(y=resistance_val, line_dash="dash", line_color="#f43f5e", line_width=1, annotation_text=f"Resistance ({cur_sym}{resistance_val:,.2f})", annotation_position="top left", row=1, col=1)
 
+            # Fibonacci retracement overlay
+            fib_specs = [
+                ("fib_500", "#f59e0b"),
+                ("fib_618", "#a855f7"),
+            ]
+            for fib_key, fib_color in fib_specs:
+                fib_val = latest_row.get(fib_key)
+                if fib_val is not None and fib_val == fib_val:
+                    fib_label = "Fib 50.0%" if fib_key == "fib_500" else "Fib 61.8%"
+                    fig.add_hline(
+                        y=float(fib_val),
+                        line_dash="dot",
+                        line_color=fib_color,
+                        line_width=1,
+                        annotation_text=f"{fib_label} ({cur_sym}{float(fib_val):,.2f})",
+                        annotation_position="top left",
+                        row=1,
+                        col=1,
+                    )
+
             # Visual overlay of stop loss & target if BUY/SELL or WAIT triggered
             if trade:
                 is_hypo = trade.get("is_hypothetical", False)
@@ -545,7 +588,8 @@ if st.session_state["last_result"] is not None:
                 entry_high = trade.get("entry_zone_high", 0)
                 stop_loss = trade.get("stop_loss", 0)
                 target_price = trade.get("target_price", 0)
-                
+                fib_anchor = trade.get("fib_anchor")
+
                 target_lbl = "Hypothetical TARGET" if is_hypo else "TARGET"
                 stop_lbl = "Hypothetical STOP" if is_hypo else "STOP LOSS"
                 entry_lbl = "HYPOTHETICAL ENTRY" if is_hypo else "ENTRY ZONE"
@@ -559,6 +603,17 @@ if st.session_state["last_result"] is not None:
                 fig.add_hline(y=stop_loss, line_dash="dot", line_color=line_col_stop, line_width=2, annotation_text=f"{stop_lbl} ({cur_sym}{stop_loss:,.2f})", annotation_position="bottom right", row=1, col=1)
                 # Entry Zone shading
                 fig.add_hrect(y0=entry_low, y1=entry_high, fillcolor=rect_color, opacity=0.08, line_width=0, annotation_text=entry_lbl, annotation_position="left", row=1, col=1)
+                if fib_anchor:
+                    fig.add_hline(
+                        y=float(fib_anchor),
+                        line_dash="dashdot",
+                        line_color="#f59e0b",
+                        line_width=2,
+                        annotation_text=f"Fib anchor ({cur_sym}{float(fib_anchor):,.2f})",
+                        annotation_position="top right",
+                        row=1,
+                        col=1,
+                    )
 
             # Volume bars chart
             v_colors = ["#22c55e" if close >= open else "#ef4444" for open, close in zip(plot_df["Open"], plot_df["Close"])]
@@ -802,7 +857,7 @@ if st.session_state["last_result"] is not None:
         st.subheader("📚 Your Track Record")
 
         if ticker_stats:
-            ts1, ts2, ts3, ts4, ts5, ts6, ts7 = st.columns(7)
+            ts1, ts2, ts3, ts4, ts5, ts6, ts7, ts8, ts9 = st.columns(9)
             ts1.metric("Total Signals", ticker_stats["total"])
             ts2.metric("✅ Wins",        ticker_stats["wins"])
             ts3.metric("❌ Losses",      ticker_stats["losses"])
@@ -811,6 +866,8 @@ if st.session_state["last_result"] is not None:
                        delta_color="normal" if ticker_stats["win_rate"] >= 50 else "inverse")
             ts6.metric("Avg Win",        f"+{ticker_stats['avg_win']}%")
             ts7.metric("Avg Loss",       f"{ticker_stats['avg_loss']}%")
+            ts8.metric("Fill Rate",      f"{ticker_stats.get('fill_rate', 0)}%")
+            ts9.metric("Unfilled",       ticker_stats.get("unfilled", 0))
 
         if past_signals:
             st.markdown("##### 🔁 Similar Past Setups")

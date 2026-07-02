@@ -24,7 +24,7 @@ def add_indicators(df):
 
     # ── Trend ───────────────────────────────────────────────────────
     df["ema9"]  = ta.trend.EMAIndicator(close, 9).ema_indicator()
-    df["ema20"] = ta.trend.EMAIndicator(close, 20).ema_indicator()
+    df["ema35"] = ta.trend.EMAIndicator(close, 35).ema_indicator()
     df["ema50"] = ta.trend.EMAIndicator(close, 50).ema_indicator()
 
     macd = ta.trend.MACD(close)
@@ -56,6 +56,28 @@ def add_indicators(df):
     # ── Support / Resistance ────────────────────────────────────────
     df["support"]    = low.rolling(20).min()
     df["resistance"] = high.rolling(20).max()
+
+    # ── Fibonacci retracement levels ────────────────────────────────
+    fib_window = 20
+    swing_high = high.rolling(fib_window).max()
+    swing_low = low.rolling(fib_window).min()
+    swing_range = (swing_high - swing_low).replace(0, np.nan)
+    trend_up = df["ema35"] >= df["ema50"]
+
+    fib_ratios = {
+        "fib_500": 0.500,
+        "fib_618": 0.618,
+    }
+
+    for col, ratio in fib_ratios.items():
+        df[col] = np.where(
+            trend_up,
+            swing_high - swing_range * ratio,
+            swing_low + swing_range * ratio,
+        )
+    df["fib_trend"] = np.where(trend_up, 1, -1)
+    df["fib_high"] = swing_high
+    df["fib_low"] = swing_low
 
     # ── Volume ──────────────────────────────────────────────────────
     df["vol_ma"]    = volume.rolling(20).mean()
