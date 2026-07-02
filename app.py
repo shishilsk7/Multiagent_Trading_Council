@@ -35,6 +35,11 @@ from stocks import UNIVERSE, CATEGORIES, ticker_label, currency_label, get_tradi
 from market_calendar import get_market_status
 from llm import check_llm_connectivity
 
+if "analysis_period" not in st.session_state:
+    st.session_state["analysis_period"] = "1mo"
+if "analysis_interval" not in st.session_state:
+    st.session_state["analysis_interval"] = "1h"
+
 st.title("📈 AI Trading Council")
 st.markdown("*Technical · Momentum · News · Risk — Real-money grade analysis*")
 
@@ -75,6 +80,10 @@ st.divider()
 st.subheader("🎓 Expert Watchlist & Actionable Setups")
 with st.expander("🔍 View Today's Key Market Setups (Dynamic Scan)", expanded=False):
     st.markdown("This panel performs a real-time scan of high-interest assets to identify key levels, support floors, and timing entry windows.")
+    st.caption(
+        f"Scan settings: {st.session_state['analysis_period']} @ {st.session_state['analysis_interval']} "
+        "(uses the same live analysis inputs as the single-asset view)"
+    )
     
     if st.button("⚡ Scan Watchlist Now", use_container_width=True):
         import concurrent.futures
@@ -83,6 +92,8 @@ with st.expander("🔍 View Today's Key Market Setups (Dynamic Scan)", expanded=
         watchlist_tickers = ["WIPRO.NS", "RELIANCE.NS", "PLTR", "BTC-USD", "NVDA"]
         nse_status = get_market_status("RELIANCE.NS")
         nse_open = nse_status["is_open"]
+        scan_period = st.session_state["analysis_period"]
+        scan_interval = st.session_state["analysis_interval"]
         
         def scan_watchlist_ticker(t):
             if is_indian(t) and not nse_open:
@@ -97,7 +108,7 @@ with st.expander("🔍 View Today's Key Market Setups (Dynamic Scan)", expanded=
                 }
             try:
                 # Use 1h timeframe for swing setups
-                r = run_enhanced_analysis(ticker=t, period="1mo", interval="1h")
+                r = run_enhanced_analysis(ticker=t, period=scan_period, interval=scan_interval)
                 return t, r
             except Exception as e:
                 return t, e
@@ -115,6 +126,7 @@ with st.expander("🔍 View Today's Key Market Setups (Dynamic Scan)", expanded=
             if decision == "MARKET_CLOSED":
                 st.warning(f"⏸️ {t}: {r.get('market_status', {}).get('message', 'Market closed')}")
                 continue
+            timeframe = f"{r.get('period', scan_period)} @ {r.get('interval', scan_interval)}"
             price = r["current_price"]
             df_ticker = r["df"]
             support = float(df_ticker.iloc[-1].get("support", 0.0))
@@ -145,6 +157,7 @@ with st.expander("🔍 View Today's Key Market Setups (Dynamic Scan)", expanded=
             col_a, col_b = st.columns([1, 3])
             with col_a:
                 st.markdown(f"### **{t}**")
+                st.caption(f"Timeframe: {timeframe}")
                 st.markdown(f"**Price**: {cur}{price:,.2f}")
                 if decision == "BUY":
                     st.success(f"🟢 BUY ({r['confidence']}%)")
@@ -189,6 +202,7 @@ with st.sidebar:
         "Candle Interval",
         ["1 Minute (Scalping)", "5 Minutes (Intraday)", "15 Minutes (Short Swing)", "1 Hour (Swing)", "1 Day (Positional)"],
         index=1,
+        key="analysis_interval_label",
     )
     
     interval_map = {
@@ -199,6 +213,7 @@ with st.sidebar:
         "1 Day (Positional)": "1d"
     }
     final_interval = interval_map[interval_label]
+    st.session_state["analysis_interval"] = final_interval
 
     # Show all lookback ranges at all times to keep UI consistent and powerful
     lookback_opts = ["1 Day", "5 Days", "1 Month", "3 Months", "6 Months", "1 Year", "2 Years", "Max"]
@@ -206,7 +221,8 @@ with st.sidebar:
     lookback_label = st.selectbox(
         "Lookback Range",
         lookback_opts,
-        index=2
+        index=2,
+        key="analysis_period_label",
     )
 
     period_map = {
@@ -220,6 +236,7 @@ with st.sidebar:
         "Max": "max"
     }
     raw_period = period_map[lookback_label]
+    st.session_state["analysis_period"] = raw_period
 
     # Resolve yfinance API limits behind the scenes and display helper notes
     adjusted = False
@@ -336,9 +353,11 @@ if run_scan and scan_enabled and scan_tickers:
                 capital=capital, risk_percent=risk_percent,
             )
             trade = r.get("trade") or {}
+            timeframe = f"{r.get('period', scan_period)} @ {r.get('interval', scan_interval)}"
             return {
                 "Ticker":     t,
                 "Asset":      UNIVERSE[t][0],
+                "Timeframe":  timeframe,
                 "Signal":     r["decision"],
                 "Conf %":     f"{r['confidence']}%",
                 "Price":      f"{currency_label(t)}{r['current_price']:,.4f}",
@@ -352,6 +371,7 @@ if run_scan and scan_enabled and scan_tickers:
         except Exception as e:
             return {
                 "Ticker": t, "Asset": UNIVERSE[t][0],
+                "Timeframe": f"{scan_period} @ {scan_interval}",
                 "Signal": "ERROR", "Conf %": "—", "Price": "—",
                 "RSI": "—", "ADX": "—", "Zone": str(e)[:50],
                 "R:R": "—", "Target": "—", "Stop": "—",
@@ -434,9 +454,11 @@ if st.session_state["last_result"] is not None:
         st.stop()
 
     actual_interval = result.get("interval", final_interval)
+    actual_period = result.get("period", period)
     st.success(f"✅ Live data: **{data_source.upper()}** · {result['data_points']} candles · {lookback_label} @ {actual_interval}")
     if actual_interval != final_interval:
         st.warning(f"⚠️ **Fallback Active**: The system fell back from **{final_interval}** to **{actual_interval}** data because the requested intraday interval returned no valid rows (often due to zero index volume on yfinance).")
+    st.caption(f"Timeframe used: {actual_period} @ {actual_interval}")
     
     if result['data_points'] < 30:
         st.warning(f"⚠️ Only {result['data_points']} candles available — indicators may be less reliable. For best accuracy, use a longer timeframe or try again during market hours.")

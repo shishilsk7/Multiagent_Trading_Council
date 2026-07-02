@@ -221,6 +221,7 @@ def run_enhanced_analysis(
     if not market_status["is_open"]:
         return {
             "ticker": ticker,
+            "period": period,
             "decision": "MARKET_CLOSED",
             "confidence": 0,
             "vote_breakdown": {},
@@ -369,6 +370,7 @@ def run_enhanced_analysis(
 
     return {
         "ticker":         ticker,
+        "period":         period,
         "decision":       decision,
         "confidence":     conf,
         "vote_breakdown": vote_breakdown,
