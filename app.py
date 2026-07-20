@@ -838,53 +838,39 @@ if st.session_state["last_result"] is not None:
         # Chart URL  (opens TradingView chart for the symbol)
         chart_open_url = f"https://www.tradingview.com/chart/?symbol={quote(tv_sym, safe='')}"
 
-        if is_hypo:
-            st.markdown("### 📊 TradingView Order Ticket *(Hypothetical Override)*")
-            st.warning(
-                "⚠️ Council says **WAIT**. You are overriding the signal. "
-                "Treat position size as guidance only — reduce size if uncertain."
-            )
-        else:
-            st.markdown("### 📊 TradingView Order Ticket")
-
-        # Validation banner
-        if not is_valid:
-            for err in val_errors:
-                if "overriding" in err.lower() or "hypothetical" in err.lower() or "marginal" in err.lower():
-                    st.warning(f"⚠️ {err}")
-                else:
-                    st.error(f"❌ {err}")
-        elif val_errors:
-            # warnings only (low-confidence, marginal R:R)
-            for err in val_errors:
-                st.warning(f"⚠️ {err}")
-
-        # TIF / expiry callout
-        st.info(
-            f"**⏱️ TIF: {tif_info['tif']}  ·  Order type: {tif_info['order_type']}**  "
-            f"  |  {tif_info['expiry_note']}  \n"
-            f"_{tif_info['tif_note']}_"
+        st.markdown("### 📊 Trading Execution Panel")
+        trade_mode = st.radio(
+            "Select Trading Mode:",
+            ["📝 Paper Trading", "💰 Actual Trading"],
+            horizontal=True
         )
 
-        # Main ticket card (copy-friendly)
-        import datetime as _dt
-        card_tag  = "HYPOTHETICAL OVERRIDE" if is_hypo else "TRADE SETUP"
-        generated = _dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+        if trade_mode == "📝 Paper Trading":
+            # Paper trading ticket
+            st.markdown("#### 📝 TradingView Paper Trading Order Ticket")
+            st.info(
+                "💡 **Paper Trading**: Use this configuration to test your setups risk-free using TradingView's built-in Paper Trading broker."
+            )
 
-        st.code(f"""
+            # Print order ticket
+            import datetime as _dt
+            generated = _dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+            card_tag = "PAPER TRADING SETUP"
+
+            st.code(f"""
 ╔══════════════════════════════════════════════════════════╗
    📋  {card_tag}  —  {asset_name}
    TradingView Symbol : {tv_sym}
    Generated          : {generated}
 ╠══════════════════════════════════════════════════════════╣
 
-  ── ORDER ────────────────────────────────────────────────
+  ── ORDER (PAPER TRADING) ────────────────────────────────
   Side          :  {order_side}
   Order Type    :  {tif_info['order_type']}  (Limit)
   TIF           :  {tif_info['tif']}          ← set in order panel
   Expiry note   :  {tif_info['expiry_note']}
 
-  ── FILL THIS IN TRADINGVIEW ─────────────────────────────
+  ── FILL THIS IN TRADINGVIEW PAPER TRADING ───────────────
   Symbol        :  {tv_sym}
   Qty / Units   :  {qty:.6f}
   Limit Price   :  {cur}{entry_mid:,.4f}    ← entry zone midpoint
@@ -896,6 +882,74 @@ if st.session_state["last_result"] is not None:
   Current Price :  {cur}{trade['current_price']:,.4f}
   ATR           :  {cur}{atr_used:.4f}
   Timing        :  {trade['timing']}
+╚══════════════════════════════════════════════════════════╝
+""", language="text")
+
+            st.caption(
+                "👆 Copy the paper trading ticket above, open TradingView, connect to 'Paper Trading by TradingView' broker, and place your limit order."
+            )
+            st.link_button(
+                f"🚀 Open {asset_name} in TradingView (Paper Trading)",
+                chart_open_url,
+                use_container_width=True,
+            )
+
+        else:
+            # Actual trading ticket
+            st.markdown("#### 💰 Actual Trading Order Ticket")
+
+            if is_hypo:
+                st.warning(
+                    "⚠️ Council says **WAIT**. You are overriding the signal. "
+                    "Treat position size as guidance only — reduce size if uncertain."
+                )
+
+            # Validation banner
+            if not is_valid:
+                for err in val_errors:
+                    if "overriding" in err.lower() or "hypothetical" in err.lower() or "marginal" in err.lower():
+                        st.warning(f"⚠️ {err}")
+                    else:
+                        st.error(f"❌ {err}")
+            elif val_errors:
+                for err in val_errors:
+                    st.warning(f"⚠️ {err}")
+
+            st.warning(
+                "🔒 **Live Order Execution Locked**: Live API orders are currently disabled. "
+                "Use the ticket below for manual execution via your connected broker at your own risk."
+            )
+
+            # TIF / expiry callout
+            st.info(
+                f"**⏱️ TIF: {tif_info['tif']}  ·  Order type: {tif_info['order_type']}**  "
+                f"  |  {tif_info['expiry_note']}  \n"
+                f"_{tif_info['tif_note']}_"
+            )
+
+            import datetime as _dt
+            generated = _dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+            card_tag = "HYPOTHETICAL OVERRIDE" if is_hypo else "ACTUAL TRADE SETUP"
+
+            st.code(f"""
+╔══════════════════════════════════════════════════════════╗
+   📋  {card_tag}  —  {asset_name}
+   TradingView Symbol : {tv_sym}
+   Generated          : {generated}
+╠══════════════════════════════════════════════════════════╣
+
+  ── ORDER (ACTUAL MONEY) ─────────────────────────────────
+  Side          :  {order_side}
+  Order Type    :  {tif_info['order_type']}  (Limit)
+  TIF           :  {tif_info['tif']}          ← set in order panel
+  Expiry note   :  {tif_info['expiry_note']}
+
+  ── FILL THIS IN YOUR BROKER PANEL ───────────────────────
+  Symbol        :  {tv_sym}
+  Qty / Units   :  {qty:.6f}
+  Limit Price   :  {cur}{entry_mid:,.4f}    ← entry zone midpoint
+  Stop Loss     :  {cur}{sl:,.4f}    ← set as bracket SL
+  Take Profit   :  {cur}{tp:,.4f}    ← set as bracket TP
 
   ── YOUR RISK ────────────────────────────────────────────
   Capital       :  ₹{trade['capital_inr']:,.0f}
@@ -910,16 +964,12 @@ if st.session_state["last_result"] is not None:
 ╚══════════════════════════════════════════════════════════╝
 """, language="text")
 
-        # Single action button
-        st.caption(
-            "👆 Copy the ticket above, then click the button to open your TradingView chart "
-            "and paste the values into the order panel manually."
-        )
-        st.link_button(
-            f"📊 Open {asset_name} Chart in TradingView",
-            chart_open_url,
-            use_container_width=True,
-        )
+            # Disabled live button
+            st.button(
+                "🔒 Live Order Placement (Disabled)",
+                disabled=True,
+                use_container_width=True,
+            )
 
     # ── Historical Memory ──────────────────────────────────────────
     past_signals = result.get("past_signals", [])
