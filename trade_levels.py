@@ -124,8 +124,8 @@ def calculate_entry_zone(latest, sr_zone, decision, ticker="", interval=""):
         anchor = fib_anchor if fib_anchor and fib_anchor < price else price
         entry_low  = round(min(price, anchor) - entry_buffer, 4)
         entry_high = round(anchor + entry_buffer * 0.5, 4)
-        stop       = round(price - (atr * stop_mult * tf["stop"]), 4)
-        target     = round(price + (atr * target_mult * tf["target"]), 4)
+        stop       = round(anchor - (atr * stop_mult * tf["stop"]), 4)
+        target     = round(anchor + (atr * target_mult * tf["target"]), 4)
 
         # Respect S/R: don't place stop above support if near it
         if sr_zone == "Near Support" and support < price:
@@ -149,8 +149,8 @@ def calculate_entry_zone(latest, sr_zone, decision, ticker="", interval=""):
         anchor = fib_anchor if fib_anchor and fib_anchor > price else price
         entry_low  = round(anchor - entry_buffer * 0.5, 4)
         entry_high = round(max(price, anchor) + entry_buffer, 4)
-        stop       = round(price + (atr * stop_mult * tf["stop"]), 4)
-        target     = round(price - (atr * target_mult * tf["target"]), 4)
+        stop       = round(anchor + (atr * stop_mult * tf["stop"]), 4)
+        target     = round(anchor - (atr * target_mult * tf["target"]), 4)
 
         # Respect S/R
         if sr_zone == "Near Resistance" and resistance > price:
@@ -172,15 +172,15 @@ def calculate_entry_zone(latest, sr_zone, decision, ticker="", interval=""):
     else:
         return None
 
-    # Safety: ensure stop and target make sense
-    if decision == "BUY" and stop >= price:
-        stop = round(price * 0.985, 4)
-    if decision == "BUY" and target <= price:
-        target = round(price * 1.02, 4)
-    if decision == "SELL" and stop <= price:
-        stop = round(price * 1.015, 4)
-    if decision == "SELL" and target >= price:
-        target = round(price * 0.98, 4)
+    # Safety: ensure stop and target make sense relative to entry bounds
+    if decision == "BUY" and stop >= entry_low:
+        stop = round(entry_low * 0.985, 4)
+    if decision == "BUY" and target <= entry_high:
+        target = round(entry_high * 1.02, 4)
+    if decision == "SELL" and stop <= entry_high:
+        stop = round(entry_high * 1.015, 4)
+    if decision == "SELL" and target >= entry_low:
+        target = round(entry_low * 0.98, 4)
 
     return {
         "entry_low":  entry_low,
