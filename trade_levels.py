@@ -334,6 +334,8 @@ def levels(latest, decision, sr_zone_label,
     capital_usd = capital / usd_inr_rate
     entry_mid   = (entry_data["entry_low"] + entry_data["entry_high"]) / 2
     position    = calculate_position_size(capital_usd, risk_percent, entry_mid, entry_data["stop"], ticker=ticker)
+    price_risk  = abs(entry_mid - entry_data["stop"])
+    position_raw = round((capital_usd * (risk_percent / 100)) / price_risk, 6) if price_risk != 0 else 0
     if position == 0:
         return None
 
@@ -378,6 +380,7 @@ def levels(latest, decision, sr_zone_label,
         "risk_percent":        risk_percent,
         "max_risk_inr":        round(capital * risk_percent / 100, 2),
 
+        "position_size_raw":   position_raw,
         "position_size":       position,
         "entry_cost_inr":      round(outcome["entry_cost"] * rate, 2),
         "expected_profit_inr": round(outcome["expected_profit"] * rate, 2),

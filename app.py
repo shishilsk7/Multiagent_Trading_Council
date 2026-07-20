@@ -828,6 +828,7 @@ if st.session_state["last_result"] is not None:
         tv_sym     = get_tradingview_symbol(ticker)
         entry_mid  = round((trade["entry_zone_low"] + trade["entry_zone_high"]) / 2, 4)
         qty        = trade["position_size"]
+        qty_raw    = trade.get("position_size_raw", qty)
         sl         = trade["stop_loss"]
         tp         = trade["target_price"]
         order_side = "BUY" if trade["decision"] == "BUY" else "SELL"
@@ -855,6 +856,9 @@ if st.session_state["last_result"] is not None:
             # Print order ticket
             import datetime as _dt
             generated = _dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+            tomorrow_local = _dt.datetime.now() + _dt.timedelta(days=1)
+            expiry_date_str = tomorrow_local.strftime("%Y-%m-%d")
+            expiry_time_str = tomorrow_local.strftime("%H:%M")
             card_tag = "PAPER TRADING SETUP"
 
             st.code(f"""
@@ -864,18 +868,21 @@ if st.session_state["last_result"] is not None:
    Generated          : {generated}
 ╠══════════════════════════════════════════════════════════╣
 
-  ── ORDER (PAPER TRADING) ────────────────────────────────
-  Side          :  {order_side}
-  Order Type    :  {tif_info['order_type']}  (Limit)
-  TIF           :  {tif_info['tif']}          ← set in order panel
-  Expiry note   :  {tif_info['expiry_note']}
+  ── ORDER CONFIGS FOR TRADINGVIEW PAPER TRADING ──────────
+  Field          :  Value
+  ─────────────────────────────────────────────────────────
+  Symbol         :  {tv_sym}
+  Action         :  {order_side.capitalize()}
+  Order Type     :  Limit
+  Price / Limit  :  {entry_mid:,.4f}
+  Shares / Qty   :  {qty_raw:.6f}
+  Time in Force  :  GTD
+  Expiry Date    :  {expiry_date_str}
+  Expiry Time    :  {expiry_time_str}
 
-  ── FILL THIS IN TRADINGVIEW PAPER TRADING ───────────────
-  Symbol        :  {tv_sym}
-  Qty / Units   :  {qty:.6f}
-  Limit Price   :  {cur}{entry_mid:,.4f}    ← entry zone midpoint
-  Stop Loss     :  {cur}{sl:,.4f}    ← set as bracket SL
-  Take Profit   :  {cur}{tp:,.4f}    ← set as bracket TP
+  ── EXITS (BRACKET ORDER) ────────────────────────────────
+  Take profit    :  {tp:,.4f}
+  Stop loss      :  {sl:,.4f}
 
   ── CONTEXT ──────────────────────────────────────────────
   Entry Zone    :  {cur}{trade['entry_zone_low']:,.4f}  →  {cur}{trade['entry_zone_high']:,.4f}
