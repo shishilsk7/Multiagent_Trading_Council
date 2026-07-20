@@ -8,6 +8,7 @@ trade_levels.py — ATR-aware, asset-class-adaptive trade sizing
 
 import requests
 import time
+import math
 
 _cached_rate = None
 _cached_rate_ts = 0.0
@@ -71,35 +72,37 @@ def _timeframe_profile(interval: str):
 
 
 def _fib_confluence(latest, decision):
-    fib_map = {
-        "fib_500": (latest.get("fib_500"), "Fib 50.0%"),
-        "fib_618": (latest.get("fib_618"), "Fib 61.8%"),
-    }
+    fib_500 = latest.get("fib_500")
+    fib_618 = latest.get("fib_618")
+    if fib_500 is None or fib_618 is None:
+        return None, None
+    try:
+        f500 = float(fib_500)
+        f618 = float(fib_618)
+    except (ValueError, TypeError):
+        return None, None
+
+    if f500 == 0 or f618 == 0 or str(f500).lower() == "nan" or str(f618).lower() == "nan":
+        return None, None
+
     price = float(latest["Close"])
+    min_fib = min(f500, f618)
+    max_fib = max(f500, f618)
     trend_up = float(latest.get("fib_trend", 1)) >= 0
-    values = [
-        (key, float(val), label)
-        for key, (val, label) in fib_map.items()
-        if val not in (None, 0) and not str(val).lower() == "nan"
-    ]
-    if not values:
+
+    # Zone check
+    if not (min_fib <= price <= max_fib):
         return None, None
 
     if decision == "BUY":
-        candidates = [item for item in values if item[1] < price]
-        if not candidates:
-            return None, None
-        anchor = max(candidates, key=lambda item: item[1])
-        label = f"{anchor[2]} pullback" if trend_up else f"Counter-trend {anchor[2].lower()} support"
-        return anchor[1], label
+        anchor = min_fib
+        label = "Fib 0.5-0.618 pullback zone" if trend_up else "Counter-trend Fib 0.5-0.618 zone support"
+        return anchor, label
 
     if decision == "SELL":
-        candidates = [item for item in values if item[1] > price]
-        if not candidates:
-            return None, None
-        anchor = min(candidates, key=lambda item: item[1])
-        label = f"{anchor[2]} retracement" if not trend_up else f"Counter-trend {anchor[2].lower()} resistance"
-        return anchor[1], label
+        anchor = max_fib
+        label = "Fib 0.5-0.618 retracement zone" if not trend_up else "Counter-trend Fib 0.5-0.618 zone resistance"
+        return anchor, label
 
     return None, None
 
@@ -191,12 +194,25 @@ def calculate_entry_zone(latest, sr_zone, decision, ticker="", interval=""):
     }
 
 
-def calculate_position_size(capital_usd, risk_percent, entry, stop):
+def calculate_position_size(capital_usd, risk_percent, entry, stop, ticker=""):
     risk_amount = capital_usd * (risk_percent / 100)
     price_risk  = abs(entry - stop)
     if price_risk == 0:
         return 0
-    return round(risk_amount / price_risk, 6)
+    raw_position = risk_amount / price_risk
+
+    # Check if crypto
+    from stocks import UNIVERSE
+    is_crypto = False
+    if ticker in UNIVERSE:
+        is_crypto = UNIVERSE[ticker][1] == "Crypto"
+    else:
+        is_crypto = any(x in ticker.upper() for x in ["BTC", "ETH", "SOL", "BNB", "XRP"])
+
+    if is_crypto:
+        return round(raw_position, 6)
+    else:
+        return math.floor(raw_position)
 
 
 def calculate_expected_outcome(position, entry, target, stop):
@@ -219,6 +235,89 @@ def calculate_expected_outcome(position, entry, target, stop):
     }
 
 
+def get_tif_for_asset(ticker: str, interval: str) -> dict:
+    """
+    Returns the correct Time-In-Force and order-type metadata for TradingView
+    based on asset class and timeframe.
+
+    TradingView rules:
+    - NSE/BSE (India): only DAY orders supported via most connected brokers
+    - Crypto (Binance/exchange): GTC is valid; also supports DAY
+    - US stocks/ETFs: DAY or GTC (GTC preferred for swing, DAY for intraday)
+    - Futures (GC=F, SI=F): GTC; futures expire so GTD is risky — use GTC
+    - For 1m/5m intervals (intraday scalp), always use DAY regardless of asset
+    """
+    t = ticker.upper()
+    intraday = interval in ("1m", "5m", "15m")
+
+    if t.endswith(".NS") or t.endswith(".BO") or t in ("^NSEI", "^BSESN"):
+        # NSE/BSE: brokers (Zerodha, Fyers) only support DAY on TradingView
+        return {
+            "tif": "DAY",
+            "tif_note": "NSE/BSE only supports DAY orders. Order expires at market close (~15:30 IST). Re-enter next session if unfilled.",
+            "order_type": "LIMIT",
+            "expiry_note": "Expires: today 15:30 IST",
+        }
+    elif any(x in t for x in ["BTC", "ETH", "SOL", "BNB", "XRP"]):
+        # Crypto: 24/7 market — GTC makes sense; DAY also fine for intraday
+        tif = "DAY" if intraday else "GTC"
+        return {
+            "tif": tif,
+            "tif_note": "Crypto trades 24/7. GTC keeps your limit live until filled or you cancel.",
+            "order_type": "LIMIT",
+            "expiry_note": "GTC: no expiry (cancel manually)" if tif == "GTC" else "DAY: expires at midnight UTC",
+        }
+    elif any(x in t for x in ["GC=F", "SI=F"]):
+        # Futures: GTC is safest; avoid GTD which requires a calendar date
+        return {
+            "tif": "GTC",
+            "tif_note": "Futures: GTC recommended. Be aware of contract rollover/expiry dates.",
+            "order_type": "LIMIT",
+            "expiry_note": "GTC: active until filled or cancelled (watch contract expiry)",
+        }
+    else:
+        # US equities / ETFs
+        tif = "DAY" if intraday else "GTC"
+        return {
+            "tif": tif,
+            "tif_note": "US equities: GTC for swing trades (active across sessions), DAY for intraday.",
+            "order_type": "LIMIT",
+            "expiry_note": "GTC: active until filled or cancelled" if tif == "GTC" else "DAY: expires at market close 16:00 ET",
+        }
+
+
+def validate_trade_setup(decision: str, confidence: int, trade: dict) -> tuple[bool, list[str]]:
+    """
+    Validates whether the current setup is actionable.
+    Returns (is_valid: bool, errors: list[str])
+    """
+    errors = []
+
+    if decision not in ("BUY", "SELL"):
+        errors.append(f"Signal is {decision}, not BUY or SELL — no trade to open.")
+
+    if confidence < 50:
+        errors.append(f"Confidence is {confidence}% (minimum 50% required).")
+    elif confidence < 60:
+        errors.append(f"Confidence is {confidence}% — low confidence, trade at your own risk.")
+
+    if trade is None:
+        errors.append("No trade plan computed — run analysis first.")
+        return False, errors
+
+    rr = trade.get("risk_reward_ratio", 0)
+    if rr < 1.0:
+        errors.append(f"R:R is 1:{rr:.2f} — below 1:1, not worth trading.")
+    elif rr < 1.2:
+        errors.append(f"R:R is 1:{rr:.2f} — marginal, consider skipping.")
+
+    if trade.get("is_hypothetical"):
+        errors.append("Setup is HYPOTHETICAL (Council says WAIT) — you are overriding the signal.")
+
+    is_valid = decision in ("BUY", "SELL") and trade is not None and rr >= 1.0
+    return is_valid, errors
+
+
 def levels(latest, decision, sr_zone_label,
            capital: float = 10_000.0, risk_percent: float = 1.0,
            ticker: str = "", interval: str = "", usd_inr_rate: float = None):
@@ -234,7 +333,7 @@ def levels(latest, decision, sr_zone_label,
     # Capital in INR → convert to USD for sizing
     capital_usd = capital / usd_inr_rate
     entry_mid   = (entry_data["entry_low"] + entry_data["entry_high"]) / 2
-    position    = calculate_position_size(capital_usd, risk_percent, entry_mid, entry_data["stop"])
+    position    = calculate_position_size(capital_usd, risk_percent, entry_mid, entry_data["stop"], ticker=ticker)
     if position == 0:
         return None
 

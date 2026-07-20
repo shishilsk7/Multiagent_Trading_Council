@@ -820,55 +820,106 @@ if st.session_state["last_result"] is not None:
         else:
             st.error(f"**R:R = 1:{rr:.2f}** — {verdict}")
 
-        # ── Copyable Trade Card ──────────────────────────────────
+        # ── TradingView Order Ticket ─────────────────────────────
         st.divider()
+        from trade_levels import get_tif_for_asset, validate_trade_setup
+
+        tif_info   = get_tif_for_asset(ticker, actual_interval)
+        tv_sym     = get_tradingview_symbol(ticker)
+        entry_mid  = round((trade["entry_zone_low"] + trade["entry_zone_high"]) / 2, 4)
+        qty        = trade["position_size"]
+        sl         = trade["stop_loss"]
+        tp         = trade["target_price"]
+        order_side = "BUY" if trade["decision"] == "BUY" else "SELL"
+
+        # Validation
+        is_valid, val_errors = validate_trade_setup(trade["decision"], conf, trade)
+
+        # Chart URL  (opens TradingView chart for the symbol)
+        chart_open_url = f"https://www.tradingview.com/chart/?symbol={quote(tv_sym, safe='')}"
+
         if is_hypo:
-            st.markdown("### 🚀 Copy Into Groww / Zerodha (Hypothetical)")
-            card_title = f"📋  HYPOTHETICAL SETUP (OVERRIDE)  —  {asset_name} ({ticker})"
-            action_label = f"{trade['decision']} (WAIT OVERRIDE)"
-            broker_note = "Groww/Zerodha → Search asset → Place entry at pullback zone or wait for setup resolution."
+            st.markdown("### 📊 TradingView Order Ticket *(Hypothetical Override)*")
+            st.warning(
+                "⚠️ Council says **WAIT**. You are overriding the signal. "
+                "Treat position size as guidance only — reduce size if uncertain."
+            )
         else:
-            st.markdown("### 🚀 Copy Into Groww / Zerodha")
-            card_title = f"📋  TRADE SETUP  —  {asset_name} ({ticker})"
-            action_label = decision
-            broker_note = {
-                "BUY":  "Groww/Zerodha → Search asset → CNC or MIS BUY order",
-                "SELL": "Groww/Zerodha → Search asset → CNC or MIS SELL/SHORT order",
-            }.get(decision, "")
+            st.markdown("### 📊 TradingView Order Ticket")
+
+        # Validation banner
+        if not is_valid:
+            for err in val_errors:
+                if "overriding" in err.lower() or "hypothetical" in err.lower() or "marginal" in err.lower():
+                    st.warning(f"⚠️ {err}")
+                else:
+                    st.error(f"❌ {err}")
+        elif val_errors:
+            # warnings only (low-confidence, marginal R:R)
+            for err in val_errors:
+                st.warning(f"⚠️ {err}")
+
+        # TIF / expiry callout
+        st.info(
+            f"**⏱️ TIF: {tif_info['tif']}  ·  Order type: {tif_info['order_type']}**  "
+            f"  |  {tif_info['expiry_note']}  \n"
+            f"_{tif_info['tif_note']}_"
+        )
+
+        # Main ticket card (copy-friendly)
+        import datetime as _dt
+        card_tag  = "HYPOTHETICAL OVERRIDE" if is_hypo else "TRADE SETUP"
+        generated = _dt.datetime.now().strftime("%Y-%m-%d %H:%M")
 
         st.code(f"""
-╔═══════════════════════════════════════════════════════╗
-   {card_title}
-   Generated: {__import__('datetime').datetime.now().strftime('%Y-%m-%d %H:%M')}
-╠═══════════════════════════════════════════════════════╣
-  Action        :  {action_label}
-  Confidence    :  {conf}%
-  Data Source   :  {data_source.upper()}
+╔══════════════════════════════════════════════════════════╗
+   📋  {card_tag}  —  {asset_name}
+   TradingView Symbol : {tv_sym}
+   Generated          : {generated}
+╠══════════════════════════════════════════════════════════╣
 
-  ── PRICE LEVELS ─────────────────────────────────────
-  Current Price :  {cur}{trade['current_price']:,.4f}
+  ── ORDER ────────────────────────────────────────────────
+  Side          :  {order_side}
+  Order Type    :  {tif_info['order_type']}  (Limit)
+  TIF           :  {tif_info['tif']}          ← set in order panel
+  Expiry note   :  {tif_info['expiry_note']}
+
+  ── FILL THIS IN TRADINGVIEW ─────────────────────────────
+  Symbol        :  {tv_sym}
+  Qty / Units   :  {qty:.6f}
+  Limit Price   :  {cur}{entry_mid:,.4f}    ← entry zone midpoint
+  Stop Loss     :  {cur}{sl:,.4f}    ← set as bracket SL
+  Take Profit   :  {cur}{tp:,.4f}    ← set as bracket TP
+
+  ── CONTEXT ──────────────────────────────────────────────
   Entry Zone    :  {cur}{trade['entry_zone_low']:,.4f}  →  {cur}{trade['entry_zone_high']:,.4f}
-  Stop Loss     :  {cur}{trade['stop_loss']:,.4f}   ← SET THIS FIRST on entry
-  Target        :  {cur}{trade['target_price']:,.4f}   ← Take profit here
+  Current Price :  {cur}{trade['current_price']:,.4f}
+  ATR           :  {cur}{atr_used:.4f}
+  Timing        :  {trade['timing']}
 
-  ── YOUR MONEY (₹) ───────────────────────────────────
+  ── YOUR RISK ────────────────────────────────────────────
   Capital       :  ₹{trade['capital_inr']:,.0f}
   Max Risk      :  ₹{trade['max_risk_inr']:,.0f}  ({trade['risk_percent']}% of capital)
   Entry Cost    :  ₹{trade['entry_cost_inr']:,.0f}
   Expected Gain :  ₹{trade['expected_profit_inr']:,.0f}  (+{trade['profit_pct']:.2f}%)
   Max Loss      :  ₹{trade['max_loss_inr']:,.0f}  (-{trade['loss_pct']:.2f}%)
+  R:R           :  1 : {rr:.2f}   {verdict}
 
-  ── POSITION ─────────────────────────────────────────
-  Quantity      :  {trade['position_size']:.6f} units
-  ATR (volatility): ${atr_used:.4f}
-  Timing        :  {trade['timing']}
-
-  ── RISK/REWARD ──────────────────────────────────────
-  R:R Ratio     :  1 : {rr:.2f}
-  Verdict       :  {verdict}
-╚═══════════════════════════════════════════════════════╝
+  Confidence    :  {conf}%
+  Data Source   :  {data_source.upper()}
+╚══════════════════════════════════════════════════════════╝
 """, language="text")
-        st.caption(f"💡 {broker_note}")
+
+        # Single action button
+        st.caption(
+            "👆 Copy the ticket above, then click the button to open your TradingView chart "
+            "and paste the values into the order panel manually."
+        )
+        st.link_button(
+            f"📊 Open {asset_name} Chart in TradingView",
+            chart_open_url,
+            use_container_width=True,
+        )
 
     # ── Historical Memory ──────────────────────────────────────────
     past_signals = result.get("past_signals", [])

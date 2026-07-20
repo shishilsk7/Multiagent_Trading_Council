@@ -143,4 +143,19 @@ _TRADINGVIEW_SYMBOLS = {
 
 
 def get_tradingview_symbol(ticker):
-    return _TRADINGVIEW_SYMBOLS.get(ticker, ticker)
+    if ticker in _TRADINGVIEW_SYMBOLS:
+        return _TRADINGVIEW_SYMBOLS[ticker]
+
+    # Safe fallback parsing for unmapped tickers
+    t = ticker.upper()
+    if t.endswith(".NS"):
+        return f"NSE:{t[:-3]}"
+    if t.endswith(".BO"):
+        return f"BSE:{t[:-3]}"
+    if t.endswith("-USD"):
+        base = t[:-4]
+        return f"BINANCE:{base}USDT"
+    if t.startswith("^"):
+        return t[1:]
+
+    return ticker
