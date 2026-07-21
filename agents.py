@@ -130,7 +130,8 @@ Interpret news impact relative to price position:
 
     return f"""You are a market sentiment analyst for {ticker}.
 
-Analyse {count} recent headlines. Weight the LATEST headline most heavily.
+Analyse {count} recent, UTC-timestamped headlines. The LATEST headline is the
+most recent by publication time; use older headlines only as supporting context.
 {price_context}
 === HEADLINES ===
 {headline_text}
@@ -140,6 +141,10 @@ Analyse {count} recent headlines. Weight the LATEST headline most heavily.
 - Negative: earnings miss, investigation, downgrade, layoffs, ban, hack
 - Neutral: routine updates, analyst price target adjustments within 5%
 - If no headlines or purely routine: respond Neutral / Neutral
+- Treat RBI and SEBI headlines as primary policy sources, but do not infer a
+  ticker-specific impact unless the headline itself establishes that connection
+- Treat a single publisher's report as unconfirmed context; do not amplify a
+  claim merely because similar headlines appear in the list
 - Factor in price position when assessing impact strength
 
 === OUTPUT FORMAT — EXACTLY 3 LINES ===

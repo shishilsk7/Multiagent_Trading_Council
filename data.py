@@ -147,9 +147,12 @@ def _mock_df() -> pd.DataFrame:
 # ══════════════════════════════════════════════════════════════════════
 
 import re
-import time
+import calendar
+import concurrent.futures
 from datetime import datetime, timedelta, timezone
+from urllib.parse import quote_plus
 import feedparser
+import requests
 
 _CRYPTO_KEYWORDS = {
     "bitcoin", "btc", "ethereum", "eth", "solana", "sol", "bnb", "xrp",
@@ -168,6 +171,56 @@ _US_TECH_KEYWORDS = {
     "nasdaq", "s&p", "earnings", "revenue", "guidance", "ai", "chips",
     "semiconductor", "cloud", "quarter", "beat", "miss", "forecast",
 }
+
+_RSS_TIMEOUT_SECONDS = 5
+_OFFICIAL_INDIA_SOURCES = {"SEBI", "RBI Press Releases", "RBI Notifications"}
+
+
+def _is_crypto_query(query: str) -> bool:
+    query_lower = query.lower()
+    return any(term in query_lower for term in ["bitcoin", "btc", "ethereum", "eth", "solana", "sol", "bnb", "xrp", "crypto"])
+
+
+def _is_india_query(query: str) -> bool:
+    query_lower = query.lower()
+    return any(term in query_lower for term in [" nse", " bse", "india", "nifty", "sensex", ".ns"])
+
+
+def _news_sources(query: str) -> list[tuple[str, str, bool]]:
+    """Return public RSS sources appropriate to the requested asset category."""
+    is_india = _is_india_query(query)
+    google_region = "IN" if is_india else "US"
+    sources = [(
+        "Google News",
+        "https://news.google.com/rss/search?"
+        f"q={quote_plus(query)}&hl=en-{google_region}&gl={google_region}&ceid={google_region}:en",
+        True,
+    )]
+
+    if _is_crypto_query(query):
+        sources.append(("CoinDesk", "https://www.coindesk.com/arc/outboundfeeds/rss/", False))
+    if is_india:
+        sources.extend([
+            ("SEBI", "https://www.sebi.gov.in/sebirss.xml", False),
+            ("RBI Press Releases", "https://rbi.org.in/pressreleases_rss.xml", False),
+            ("RBI Notifications", "https://rbi.org.in/notifications_rss.xml", False),
+        ])
+    return sources
+
+
+def _fetch_feed(source: str, url: str, strip_title_source: bool) -> tuple[str, bool, list]:
+    """Fetch one public RSS feed with a bounded timeout; failures are non-fatal."""
+    try:
+        response = requests.get(
+            url,
+            headers={"User-Agent": "Multiagent-Trading-Council/1.0 (+RSS reader)"},
+            timeout=_RSS_TIMEOUT_SECONDS,
+        )
+        response.raise_for_status()
+        return source, strip_title_source, feedparser.parse(response.content).entries
+    except Exception as e:
+        print(f"data.py: RSS source {source} failed for '{url}': {e}")
+        return source, strip_title_source, []
 
 
 def _build_keyword_set(query: str) -> set:
@@ -209,32 +262,32 @@ def _is_duplicate(title: str, seen: list, threshold: float = 0.65) -> bool:
     return False
 
 
-def _entry_is_fresh(entry, max_age_hours: int) -> bool:
+def _entry_datetime(entry):
     published = getattr(entry, "published_parsed", None)
     if not published:
-        return False
+        return None
     try:
-        published_dt = datetime.fromtimestamp(time.mktime(published), tz=timezone.utc)
-        return datetime.now(timezone.utc) - published_dt <= timedelta(hours=max_age_hours)
+        # RSS parsers return a UTC struct_time. calendar.timegm preserves that
+        # timezone instead of interpreting it as the host machine's local time.
+        return datetime.fromtimestamp(calendar.timegm(published), tz=timezone.utc)
     except Exception:
+        return None
+
+
+def _entry_is_fresh(published_dt, max_age_hours: int) -> bool:
+    if not published_dt:
         return False
+    age = datetime.now(timezone.utc) - published_dt
+    return timedelta(0) <= age <= timedelta(hours=max_age_hours)
 
 
-def _format_entry(entry) -> str:
+def _format_entry(entry, source: str, published_dt, strip_title_source: bool) -> str:
     title = entry.title.strip()
-    source_match = re.search(r'[-–]\s*([^-–]{3,40})$', title)
-    source = source_match.group(1).strip() if source_match else "Unknown"
-    published = getattr(entry, "published_parsed", None)
-    if published:
-        try:
-            dt = datetime.fromtimestamp(time.mktime(published), tz=timezone.utc)
-            stamp = dt.strftime("%b %d %H:%M UTC")
-        except Exception:
-            stamp = "recent"
-    else:
-        stamp = "recent"
-    clean_title = re.sub(r'\s*[-–]\s*[^-–]{3,40}$', '', title).strip()
-    return f"{clean_title} ({source}, {stamp})"
+    if strip_title_source:
+        source_match = re.search(r'[-–]\s*([^-–]{3,40})$', title)
+        source = source_match.group(1).strip() if source_match else source
+        title = re.sub(r'\s*[-–]\s*[^-–]{3,40}$', '', title).strip()
+    return f"{title} ({source}, {published_dt.strftime('%b %d %H:%M UTC')})"
 
 
 def fetch_news(
@@ -244,39 +297,51 @@ def fetch_news(
     min_relevance: int = 1,
 ) -> list:
     """
-    Fetch relevant, deduplicated, source-tagged headlines.
+    Fetch relevant, recent, globally deduplicated, source-tagged headlines.
     Returns [] on any failure — never raises.
     """
-    feed_url = f"https://news.google.com/rss/search?q={query.replace(' ', '+')}&hl=en-US&gl=US&ceid=US:en"
-    try:
-        feed = feedparser.parse(feed_url, request_headers={"User-Agent": "Mozilla/5.0"})
-    except Exception as e:
-        print(f"data.py: feedparser failed for '{query}': {e}")
-        return []
-
-    if not feed.entries:
-        return []
-
     keywords = _build_keyword_set(query)
-    seen_normalised: list = []
-    results: list = []
+    source_specs = _news_sources(query)
+    candidates: list[tuple[datetime, int, str, str, str]] = []
 
-    for entry in feed.entries:
-        if len(results) >= max_items * 3:
-            break
-        title = getattr(entry, "title", "").strip()
-        if not title or len(title) < 10:
-            continue
-        if not _entry_is_fresh(entry, max_age_hours):
-            continue
-        score = _relevance_score(title, keywords)
-        if score < min_relevance:
-            continue
-        norm = _normalise_title(title)
+    # Source requests are independent. Parallel fetches avoid turning a slow
+    # public RSS endpoint into cumulative latency for the analysis run.
+    with concurrent.futures.ThreadPoolExecutor(max_workers=len(source_specs)) as executor:
+        futures = [executor.submit(_fetch_feed, *spec) for spec in source_specs]
+        for future in concurrent.futures.as_completed(futures):
+            source, strip_title_source, entries = future.result()
+            for entry in entries:
+                title = getattr(entry, "title", "").strip()
+                if not title or len(title) < 10 or "sponsored" in title.lower():
+                    continue
+                published_dt = _entry_datetime(entry)
+                if not _entry_is_fresh(published_dt, max_age_hours):
+                    continue
+                score = _relevance_score(title, keywords)
+                if score < min_relevance:
+                    continue
+                candidates.append((
+                    published_dt,
+                    score,
+                    _normalise_title(title),
+                    source,
+                    _format_entry(entry, source, published_dt, strip_title_source),
+                ))
+
+    # Timestamp is primary: the prompt's first headline is genuinely latest.
+    candidates.sort(key=lambda item: (item[0], item[1]), reverse=True)
+    seen_normalised: list = []
+    results: list[str] = []
+    official_india_count = 0
+    for _, _, norm, source, headline in candidates:
         if _is_duplicate(norm, seen_normalised):
             continue
+        if source in _OFFICIAL_INDIA_SOURCES and official_india_count >= 2:
+            continue
         seen_normalised.append(norm)
-        results.append((score, _format_entry(entry)))
-
-    results.sort(key=lambda x: x[0], reverse=True)
-    return [h for _, h in results[:max_items]]
+        results.append(headline)
+        if source in _OFFICIAL_INDIA_SOURCES:
+            official_india_count += 1
+        if len(results) >= max_items:
+            break
+    return results
